@@ -1,4 +1,4 @@
-use std::fs::{read, File};
+use std::fs::{read};
 use std::os::wasi;
 use asr::{future::next_tick, settings::Gui, PointerSize, Process, deep_pointer::DeepPointer, watcher::{Watcher,Pair}, Address};
 use asr::string::{ArrayCString, ArrayString};
