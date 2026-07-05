@@ -1,11 +1,8 @@
-use std::fmt::UpperHex;
 use std::fs::{read};
 use std::os::wasi;
 use asr::{future::next_tick, settings::Gui, PointerSize, Process, deep_pointer::DeepPointer,
-    watcher::{Watcher,Pair}, Address, signature::Signature};
+    watcher::{Watcher,Pair}, Address, string::{ArrayCString}, signature::Signature};
 use asr::file_format::pe;
-use asr::string::{ArrayCString, ArrayString};
-use md5::Digest;
 
 asr::async_main!(stable);
 
@@ -103,7 +100,7 @@ async fn main() {
                     "616C5751AC9FC584AF250F1B04474AFD" | //demo 1.09 vanilla Itch
                     "05689183497E58838E99B897F2E0E6AC" | //demo 1.09 30tbps Itch
                     "267A8ABE468D824222810201F00003BE" | //demo 1.09 vanilla Steam
-                    "272A16964597ED6DC8D2393ED051D3CE" => "Demo v1.09",
+                    "272A16964597ED6DC8D2393ED051D3CE" => "Demo v1.09", // demo 1.09 30tbps Steam
                     "A88A2DB3A68C714CA2B1FF57AC08A032" | //SP-EN vanilla
                     "047C11435B1C592EC731BFF3B9C5B0CF" | //SP-EN 30tbps
                     "22008370824A37BAEF8948127963C769" | //SP-JP vanilla
