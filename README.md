@@ -1,6 +1,6 @@
-# deltarune-test1
+# DELTARUNE Autosplitter
 
-An auto splitter for DELTARUNE.
+A cross-platform auto splitter for DELTARUNE.
 
 ## Compilation
 
