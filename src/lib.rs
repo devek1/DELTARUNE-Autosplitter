@@ -1144,7 +1144,7 @@ async fn main() {
                 loop {
                     settings.update();
 
-                    if ps == ps32 {
+                    if ps == ps32 && version != "SURVEY_PROGRAM" {
                         chapter = old_chapter_ptr.update_value(&process).current as i32;
                     }
                     timer::set_variable_int("Chapter",chapter);
