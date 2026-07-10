@@ -18,11 +18,6 @@ jobs:
       - name: Checkout Commit
         uses: actions/checkout@v4
 
-      - name: Delete Latest tag
-        run: gh release delete latest --cleanup-tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install Rust
         uses: hecrj/setup-rust-action@v2
         with:
@@ -33,11 +28,16 @@ jobs:
         run: |
           cargo b --release --locked
 
+      - name: Delete Latest tag
+        run: gh release delete latest --cleanup-tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Release
         if: github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
-          files: target/wasm32-wasip1/release/deltarune_test1.wasm
+          files: target/wasm32-wasip1/release/deltarune_autosplitter.wasm
           name: Latest
           tag_name: latest
           body: This contains the latest version of the auto splitter.
