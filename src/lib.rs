@@ -367,6 +367,8 @@ struct Settings {
     ch5_title : Title,
     ///Start/reset timer on loading Ch4 completion data?
     ch5_start_on_prev : Ch5StartOnPrev,
+    ///Bed Skip
+    ch5_bedskip : bool,
     ///Enter Castle Town
     ch5_enter_castle_town : bool,
     ///Enter Flower King Dark World (True Reset)
@@ -540,6 +542,11 @@ fn start(auto_start : &AutoStart, splits : &mut HashSet<String>) {
     }
 }
 
+const IL_Pauses : [&str;5] = ["ch1_ending","ch2_ending_il","ch3_ending","ch4_ending_il","ch5_ending_src"];
+const AC_Pauses : [&str;5] = ["ch1_ending","ch2_ending_ac","ch3_ending","ch4_ending_ac","ch5_ending_src"]; //Ch5 ending in this set will change after Ch6 release
+const OST_Pauses : [&str;5] = ["ch1_ending_ost","ch2_ending_ac","ch3_ending_ost","ch4_ending_ost","ch5_ending_src"];
+const OST_LateCh2_Pauses : [&str;5] = ["ch1_ending_ost","ch2_ending_ost","ch3_ending","ch4_ending_ost","ch5_ending_src"];
+
 //also does some handling for IGT pausing and unpausing to simplify code elsewhere
 fn split(splits : &mut HashSet<String>, settings : &Settings, name : &str, already_checked : bool) {
     if settings.ac_pause_timer {
@@ -548,20 +555,13 @@ fn split(splits : &mut HashSet<String>, settings : &Settings, name : &str, alrea
             return;
         }
         //NOTE: Ch5 ending pauses are currently meant for TRACABARTPEEG and assume the category will follow the main rules regarding 5A end timing. After Ch6 releases, the AllChapters mode pause timing for Ch5 will presumably change to completion data
-        match (name,&settings.chapter_pause_timing) {
-            ("ch1_ending",ChapterEndTimings::SingleChapter | ChapterEndTimings::AllChapters) => timer::pause_game_time(),
-            ("ch1_ending_ost",ChapterEndTimings::OST | ChapterEndTimings::OSTLateCh2) => timer::pause_game_time(),
-            ("ch2_ending_il",ChapterEndTimings::SingleChapter) => timer::pause_game_time(),
-            ("ch2_ending_ost",ChapterEndTimings::OSTLateCh2) => timer::pause_game_time(),
-            ("ch2_ending_ac",ChapterEndTimings::AllChapters | ChapterEndTimings::OST) => timer::pause_game_time(),
-            ("ch3_ending_ost",ChapterEndTimings::OST) => timer::pause_game_time(),
-            ("ch3_ending",ChapterEndTimings::AllChapters | ChapterEndTimings::SingleChapter | ChapterEndTimings::OSTLateCh2) => timer::pause_game_time(),
-            ("ch4_ending",ChapterEndTimings::AllChapters) => timer::pause_game_time(),
-            ("ch4_ending_il",ChapterEndTimings::SingleChapter) => timer::pause_game_time(),
-            ("ch4_ending_ost",ChapterEndTimings::OST | ChapterEndTimings::OSTLateCh2) => timer::pause_game_time(),
-            ("ch5_sideb",_) => timer::pause_game_time(),
-            ("ch5_ending_src",_) => timer::pause_game_time(),
-            _ => ()
+        if match &settings.chapter_pause_timing {
+            ChapterEndTimings::SingleChapter => IL_Pauses,
+            ChapterEndTimings::AllChapters => AC_Pauses,
+            ChapterEndTimings::OST => OST_Pauses,
+            ChapterEndTimings::OSTLateCh2 => OST_LateCh2_Pauses
+        }.contains(&name) {
+            timer::pause_game_time();
         }
     }
     if !already_checked && (name == "" || splits.contains(name) || !read_setting(name) ) {
