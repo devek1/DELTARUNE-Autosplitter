@@ -497,7 +497,7 @@ fn text_close_check(txt : &Pair<ArrayCString<128>>, en : &str, jp : &str) -> boo
     txt.bytes_changed() && text_match(txt.old,en,jp)
 }
 
-fn text_open_check_multipointer(txts : &Vec<Pair<ArrayCString<128>>>, en : &str, jp : &str) -> bool {
+fn text_open_check_multipointer(txts : &Vec<&Pair<ArrayCString<128>>>, en : &str, jp : &str) -> bool {
     for txt in txts {
         if text_open_check(txt,en,jp) {
             return true;
@@ -505,7 +505,7 @@ fn text_open_check_multipointer(txts : &Vec<Pair<ArrayCString<128>>>, en : &str,
     }
     return false;
 }
-fn text_close_check_multipointer(txts : &Vec<Pair<ArrayCString<128>>>, en : &str, jp : &str) -> bool {
+fn text_close_check_multipointer(txts : &Vec<&Pair<ArrayCString<128>>>, en : &str, jp : &str) -> bool {
     for txt in txts {
         if text_close_check(txt,en,jp) {
             return true;
@@ -574,36 +574,30 @@ fn split(splits : &mut HashSet<String>, settings : &Settings, name : &str, alrea
 
 struct VarTrack<T: Clone + bytemuck::Pod> {
     pointer : Option<DeepPointer<16>>,
-    watcher : Option<Watcher<T>>,
+    watcher : Watcher<T>,
 }
 impl<T: Clone + bytemuck::Pod> VarTrack<T> {
     fn disabled() -> VarTrack<T> {
         VarTrack {
-            watcher: None,
+            watcher: Watcher::<T>::new(),
             pointer: None,
         }
     }
     fn new(module_base : Address, pointer_size: PointerSize, offsets : &[u64]) -> VarTrack<T> {
         VarTrack {
-            watcher: Some(Watcher::<T>::new()),
+            watcher: Watcher::<T>::new(),
             pointer: match offsets {
                 &[0] => None,
                 x => Some(DeepPointer::new(module_base, pointer_size, x)),
             }
         }
     }
-    fn update_value(&mut self, process: &Process) -> Pair<T> {
-        if self.pointer.is_none() || self.watcher.is_none() {
-            return Pair {
-                old: T::zeroed(),
-                current: T::zeroed(),
-            }
+    fn update_value(&mut self, process: &Process) -> &Pair<T> {
+        if self.pointer.is_none() {
+            return self.watcher.update_infallible(T::zeroed())
         }
-        let value: Option<T> = match self.pointer.unwrap().deref(&process) {
-            Ok(val) => Some(val),
-            Err(_e) => Some(T::zeroed()),
-        };
-        *self.watcher.unwrap().update_infallible(value.unwrap())
+        let value = self.pointer.unwrap().deref(&process).unwrap_or_else(|_e| T::zeroed());
+        self.watcher.update_infallible(value)
     }
 }
 
@@ -1201,7 +1195,6 @@ async fn main() {
                                         tempVar = 0;
                                         ost_end_active = false;
                                         start(&settings.auto_start,&mut splits);
-                                        asr::print_message("called autostart function");
                                     }
                                 }
                             }
@@ -1210,7 +1203,6 @@ async fn main() {
                                     tempVar = 0;
                                     ost_end_active = false;
                                     start(&settings.auto_start,&mut splits);
-                                    asr::print_message("called autostart function");
                                 }
                             }
                         }
@@ -1219,11 +1211,10 @@ async fn main() {
                             {
                                 let namer_event = namer_ptr.update_value(&process);
                                 timer::set_variable_float("Namer Event",namer_event.current);
-                                if namer_event.current == 75.0 && namer_event.old < 75.0 {
+                                if namer_event.current == 75.0 && namer_event.old != 75.0 {
                                     tempVar = 0;
                                     ost_end_active = false;
                                     start(&settings.auto_start,&mut splits);
-                                    asr::print_message("called autostart function");
                                 }
                             }
                         }
