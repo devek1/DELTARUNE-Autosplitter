@@ -1594,8 +1594,9 @@ async fn main() {
                                         ("room_dw_fcastle_flowerclimb","room_dw_fcastle_flowerydash") => "ch5_end_final_climb",
                                         ("room_dw_fcastle_flowerydash","room_dw_post_flowery_battle") => "ch5_omega_flowery",
                                         ("room_dw_fcastle_top_fountain","room_dw_post_fountain_close") => "ch5_fountain1",
-                                        ("room_cc_fountain","room_flowershop_2f") => "ch5_fountain2",
-                                        (_,"room_schooldoor") if false => "ch5_ending_completion_data", //need to find some condition to ensure this only happens at the ending and not at the start. Might need a new pointer? Plot is probably a good idea
+                                        ("room_cc_fountain","room_flowershop_2f") => { tempVar = 1; "ch5_fountain2" }, //Completion data can only happen after this and in the same session
+                                        (_,"PLACE_MENU") => {tempVar = 0;""} //just in case, make sure to disable the completion data split's eligibility if you somehow go back to the menu and load a different save (which shouldn't really be possible on PC since you're in the Light World)
+                                        (_,"room_schooldoor") if tempVar == 1 => "ch5_ending_completion_data",
                                         ("room_schooldoor","room_ed") => "ch5_ending_src",
                                         _ => ""
                                     },false);
