@@ -8,11 +8,24 @@ use asr::{
 };
 use std::collections::{HashSet};
 use core::time::Duration;
+use crate::Ver::{*};
 
 asr::async_main!(stable);
 
+enum Ver {
+    Invalid,
+    SP,
+    D109,
+    D110,
+    D115,
+    D119,
+    Ch4_v102, //for Ch3
+    Ch5_v244, //for All Items
+    Ch5_v247
+}
+
 #[derive(Gui)]
-enum ChapterEndTimings {
+enum PauseTiming {
     /// Individual chapter run rules
     SingleChapter,
     /// All Chapters rules
@@ -59,7 +72,7 @@ struct Settings {
     #[default = true]
     ac_pause_timer: bool,
     ///Timing of the pauses
-    chapter_pause_timing : ChapterEndTimings,
+    chapter_pause_timing : PauseTiming,
     ///Also unpause from loading a savefile
     ac_unpause_loadsave: bool,
 
@@ -556,10 +569,10 @@ fn split(splits : &mut HashSet<String>, settings : &Settings, name : &str, alrea
         }
         //NOTE: Ch5 ending pauses are currently meant for TRACABARTPEEG and assume the category will follow the main rules regarding 5A end timing. After Ch6 releases, the AllChapters mode pause timing for Ch5 will presumably change to completion data
         if match &settings.chapter_pause_timing {
-            ChapterEndTimings::SingleChapter => IL_Pauses,
-            ChapterEndTimings::AllChapters => AC_Pauses,
-            ChapterEndTimings::OST => OST_Pauses,
-            ChapterEndTimings::OSTLateCh2 => OST_LateCh2_Pauses
+            PauseTiming::SingleChapter => IL_Pauses,
+            PauseTiming::AllChapters => AC_Pauses,
+            PauseTiming::OST => OST_Pauses,
+            PauseTiming::OSTLateCh2 => OST_LateCh2_Pauses
         }.contains(&name) {
             timer::pause_game_time();
         }
@@ -631,36 +644,47 @@ async fn main() {
                     "A88A2DB3A68C714CA2B1FF57AC08A032" | //SP-EN vanilla
                     "047C11435B1C592EC731BFF3B9C5B0CF" | //SP-EN 30tbps
                     "22008370824A37BAEF8948127963C769" | //SP-JP vanilla
-                    "E05433FE679BC91E3809C1138E3A8EA1" => "SURVEY_PROGRAM", //SP-JP 30tbps
+                    "E05433FE679BC91E3809C1138E3A8EA1" => SP, //SP-JP 30tbps
                     "616C5751AC9FC584AF250F1B04474AFD" | //demo 1.09 vanilla Itch
                     "05689183497E58838E99B897F2E0E6AC" | //demo 1.09 30tbps Itch
                     "267A8ABE468D824222810201F00003BE" | //demo 1.09 vanilla Steam
-                    "272A16964597ED6DC8D2393ED051D3CE" => "Demo v1.09", // demo 1.09 30tbps Steam
+                    "272A16964597ED6DC8D2393ED051D3CE" => D109, // demo 1.09 30tbps Steam
                     "5FBE01F2BC1C04F45D809FFD060AC386" | //demo 1.10 vanilla Itch
                     "A37C77A4310D2D6A6C2AF18294AAAE7A" | //demo 1.10 30tbps Itch
                     "CD77A63D7902990DBC704FE32B30700A" | //demo 1.10 vanilla Steam
-                    "758C8862F22F778FDEAFE25FBCD1F4EC" => "Demo v1.10", //demo 1.10 30tbps Steam
+                    "758C8862F22F778FDEAFE25FBCD1F4EC" => D110, //demo 1.10 30tbps Steam
                     "ED4568BAB864166BFD6322CEEB3FB544" | //demo 1.15 vanilla
-                    "6BD6D1381C194C0F456B184CB48D132D" => "Demo v1.15", //demo 1.15 30tbps
+                    "6BD6D1381C194C0F456B184CB48D132D" => D115, //demo 1.15 30tbps
                     "7AD299A8B33FA449E20EDFE0FEDEDDB2" | //demo 1.19 vanilla
-                    "FD0857E6A3AF3AA74E5E00F15AEA5224" => "Demo v1.19", //demo 1.19 30tbps
+                    "FD0857E6A3AF3AA74E5E00F15AEA5224" => D119, //demo 1.19 30tbps
                     "B5EF0EEC9554C491777D6C4E93E0DF76" | //v1.02 vanilla
-                    "40A8185886A8A1A2BE996BC57DE3D916" => "CH1-4 v1.02", //v1.02 30tbps
+                    "40A8185886A8A1A2BE996BC57DE3D916" => Ch4_v102, //v1.02 30tbps
+                    "DDEDBBD10FF129B49C64DBEFAA763C6A" | //v244 vanilla
+                    "4A9C69B42E442B673395B3253F292F17" | // v244 30 TBPS mod
+                    "42B66B41B6CEA12FB54219E9D31E5DC8" | // v244 Item tracker mod
+                    "D0420C09A5DEBD6176EA24A1FE1EE3E3" => Ch5_v244, // OST% tracker mod
                     "908643B7593B000F5B6C61BB484D086A" | //v247 vanilla
                     "80A63475EF69529B612F9DCA75AF4CC5" | //v247 30tbps
                     "3217F3BFE82C3E4AA8EE2E9E3A4F4E14" | //v247 Item Tracker
-                    "21CDD09EEADBCC77535AB2BB3412259A" => "CH1-5 v247", //v247 OST tracker
-                    _ => "invalid",
+                    "21CDD09EEADBCC77535AB2BB3412259A" => Ch5_v247, //v247 OST tracker
+                    _ => Invalid,
                 };
-                timer::set_variable("version", version);
+                timer::set_variable("version", match version {
+                    Invalid => "Invalid",
+                    SP => "SURVEY_PROGRAM",
+                    D109 => "Demo v1.09",
+                    D110 => "Demo v1.10",
+                    D115 => "Demo v1.15",
+                    D119 => "Demo v1.19",
+                    Ch4_v102 => "Ch1-4 v1.02",
+                    Ch5_v244 => "Ch1-5, Ch5 v0.0.244",
+                    Ch5_v247 => "Ch1-5, Ch5 v0.0.247",
+                });
 
-                if version == "invalid" { loop { next_tick().await; } }
+                if matches!(version,Invalid) { loop { next_tick().await; } }
 
                 let ps = match version {
-                    "SURVEY_PROGRAM" |
-                    "Demo v1.09" |
-                    "Demo v1.10" |
-                    "Demo v1.15" => ps32,
+                    SP | D109 | D110 | D115 | D119 => ps32,
                     _ => ps64
                 };
 
@@ -671,10 +695,10 @@ async fn main() {
                     let mut _dir : ArrayCString<256>;
                     loop {
                         _dir = process.read_pointer_path::<ArrayCString<256>>(DELTARUNE, ps, match version {
-                            "CH1-5 v247" => &[0x8BA818,0],
-                            "CH1-4 v1.02" => &[0x8B2818,0],
-                            "Demo v1.19" => &[0x8D06E0,0],
-                            _ => n,
+                            Invalid|SP|D109|D110|D115 => n,
+                            Ch5_v244 | Ch5_v247 => &[0x8BA818,0],
+                            Ch4_v102 => &[0x8B2818,0],
+                            D119 => &[0x8D06E0,0],
                         }).unwrap_or_default();
                         if _dir != ArrayCString::<256>::default() {
                             break;
@@ -733,76 +757,84 @@ async fn main() {
                 // sound stuff (pointer only varies by runner version)
 
                 let mut snd_ptr = VarTrack::<ArrayCString<256>>::new(DELTARUNE,ps,match version {
-                    "Demo v1.09" | "Demo v1.10" => &[0x4E0794, 0x58, 0xC0,  0x40, 0x0],
-                    "Demo v1.15" => &[0x4E20B4, 0x58, 0xC0,  0x40, 0x0],
-                    "Demo v1.19" | "CH1-4 v1.02" => &[0x6A3818, 0x60, 0xD0, 0x58, 0x0],
-                    "CH1-5 v247" => &[0x6AB818, 0x60, 0xD0, 0x58, 0x0],
-                    _ => n
+                    Invalid | SP => n,
+                    D109|D110 => &[0x4E0794, 0x58, 0xC0,  0x40, 0x0],
+                    D115 => &[0x4E20B4, 0x58, 0xC0,  0x40, 0x0],
+                    D119 | Ch4_v102 => &[0x6A3818, 0x60, 0xD0, 0x58, 0x0],
+                    Ch5_v244 | Ch5_v247 => &[0x6AB818, 0x60, 0xD0, 0x58, 0x0],
                 });
 
                 let mut mus_ptr = VarTrack::<ArrayCString<256>>::new(DELTARUNE,ps,match version {
-                    "Demo v1.09" | "Demo v1.10" => &[0x4DFF58, 0x0,  0x44,  0x0],
-                    "Demo v1.15" => &[0x4E1878, 0x0,  0x0,   0x0],
-                    "Demo v1.19" | "CH1-4 v1.02" => &[0x6A2F90, 0x0,  0x0,  0x0],
-                    "CH1-5 v247" => &[0x6AAF90, 0x0,  0x0,  0x0],
-                    _ => n
+                    Invalid | SP => n,
+                    D109|D110 => &[0x4DFF58, 0x0,  0x44,  0x0],
+                    D115 => &[0x4E1878, 0x0,  0x0,   0x0],
+                    D119 | Ch4_v102 => &[0x6A2F90, 0x0,  0x0,  0x0],
+
+                    Ch5_v244 | Ch5_v247 => &[0x6AAF90, 0x0,  0x0,  0x0],
                 });
 
 
                 //DEVICE_NAMER.EVENT
 
                 let mut namer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "Demo v1.09" => &[0x6EF220, 0xD4, 0x5C,  0x20, 0x24,  0x10, 0x9C,  0x0],
-                    "Demo v1.10" => &[0x6EF220, 0xD4, 0x5C,  0x20, 0x24,  0x10, 0x2F4, 0x0],
-                    "Demo v1.15" => &[0x6F0B48, 0xD4, 0x5C,  0x20, 0x24, 0x10, 0xFC,  0x0],
-                    "Demo v1.19" => &[0x8B2790, 0x178, 0x70,  0x38, 0x48,  0x10, 0x3B0, 0x0],
-                    "CH1-4 v1.02" => match chapter {
+                    Invalid|SP => n,
+                    D109 => &[0x6EF220, 0xD4, 0x5C,  0x20, 0x24,  0x10, 0x9C,  0x0],
+                    D110 => &[0x6EF220, 0xD4, 0x5C,  0x20, 0x24,  0x10, 0x2F4, 0x0],
+                    D115 => &[0x6F0B48, 0xD4, 0x5C,  0x20, 0x24, 0x10, 0xFC,  0x0],
+                    D119 => &[0x8B2790, 0x178, 0x70,  0x38, 0x48,  0x10, 0x3B0, 0x0],
+                    Ch4_v102 => match chapter {
                         2 | 3 => &[0x8B2790, 0x178, 0x70, 0x38, 0x48, 0x10, 0x60, 0x0],
                         4 => &[0x8B2790, 0x178, 0x70, 0x38, 0x48, 0x10, 0x280, 0x0],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 => match chapter {
+                        2 => &[0x8BA790, 0x178, 0x70,  0x38,   0x48,  0x10,  0x90,  0x0],
+                        3 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48, 0x10, 0x120, 0x0],
+                        4 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48,  0x10,  0x40,  0x0],
+                        5 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48, 0x10, 0x170, 0x0],
+                        _ => n
+                    }
+                    Ch5_v247 => match chapter {
                         2 => &[0x8BA790, 0x178, 0x70,  0x38,   0x48,  0x10,  0x90,  0x0],
                         3 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48, 0x10, 0x120, 0x0],
                         4 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48,  0x10,  0x40,  0x0],
                         5 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48, 0x10, 0x220, 0x0],
                         _ => n
                     }
-                    _ => n
                 });
 
                 //Global variables
                 //(note: for global.flag[N] values, the last offset is the only difference between different flags' locations, and is equal to 16x the flag's index number - which you can get either by directly multiplying by 16 and putting it in as a decimal number, or by converting to hex then adding a trailing zero.)
 
                 let mut old_chapter_ptr = VarTrack::<f64>::new(DELTARUNE,ps, match version {
-                    "Demo v1.09" | "Demo v1.10" => &[0x6FCF38, 0x30, 0x24D8, 0x0],
-                    "Demo v1.15" => &[0x6FE860, 0x30, 0x2F34, 0x80],
+                    D109 | D110 => &[0x6FCF38, 0x30, 0x24D8, 0x0],
+                    D115 => &[0x6FE860, 0x30, 0x2F34, 0x80],
                     _ => n
                 });
 
                 let mut filechoice_ptr = VarTrack::<f64>::new(DELTARUNE,ps, match version {
-                    "SURVEY_PROGRAM" => &[0x48E5DC, 0x27C, 0x488, 0x4D0],
+                    SP => &[0x48E5DC, 0x27C, 0x488, 0x4D0],
                     _ => n
                 });
 
                 //DOESN'T WORK FOR CHAPTER 1?
                 let mut fighting_ptr = VarTrack::<f64>::new(DELTARUNE,ps, match version {
-                    "SURVEY_PROGRAM" => n,
-                    "Demo v1.09" | "Demo v1.10" => &[0x6FCF38, 0x30, 0x4F8,  0x0],
-                    "Demo v1.15" => &[0x6FE860, 0x30, 0xA758, 0x0],
-                    "Demo v1.19" => match chapter {
+                    SP => n,
+                    D109 | D110 => &[0x6FCF38, 0x30, 0x4F8,  0x0],
+                    D115 => &[0x6FE860, 0x30, 0xA758, 0x0],
+                    D119 => match chapter {
                         1 => n, //&[0x6A1CA8, 0x48, 0x10, 0x32F0, 0x710], (doesn't work points to some tiny value)
                         2 => &[0x6A1CA8, 0x48, 0x10, 0x7790, 0xBB0],
                         _ => n
                     }
-                    "CH1-4 v1.02" => match chapter {
+                    Ch4_v102 => match chapter {
                         1 => n, //&[0x6A1CA8, 0x48, 0x10,  0x1E40, 0x720], (other LTS fight_ch1 pointers don't work so I assume this one doesn't either
                         2 => &[0x6A1CA8, 0x48,  0x10,  0x100,  0x0],
                         3 => &[0x6A1CA8, 0x48,  0x10,   0x1190, 0x370],
                         4 => &[0x6A1CA8, 0x48,  0x10,   0x72B0, 0x370],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v247 => match chapter {
                         1 => n, //&[0x6A9CA8, 0x48, 0x10,  0x1E40, 0x740], (points to Dark Dollars instead)
                         2 => &[0x6A9CA8, 0x48,  0x10,  0x100,  0x0],
                         3 => &[0x6A9CA8, 0x48,  0x10,   0x1190, 0x370],
@@ -814,80 +846,81 @@ async fn main() {
                 });
 
                 let mut plot_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x48E5DC, 0x27C, 0x488, 0x500],
-                    "CH1-4 v1.02" => match chapter {
+                    Invalid|D109|D110|D115|D119 => n,
+                    SP => &[0x48E5DC, 0x27C, 0x488, 0x500],
+                    Ch4_v102 => match chapter {
                         3 => &[0x6A1CA8, 0x48,  0x10,   0x1000, 0x250],
                         4 => &[0x6A1CA8, 0x48,  0x10,   0x2F40, 0x30],
                         _ => n
                     },
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         3 => &[0x6A9CA8, 0x48,  0x10,   0x1000, 0x250],
                         4 => &[0x6A9CA8, 0x48,  0x10,   0x2F70, 0x30],
                         _ => n
                     },
-                    _ => n
                 });
 
                 let mut choicer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x48E5DC, 0x27C, 0x28,  0x40],
-                    "Demo v1.09" | "Demo v1.10" => &[0x6FCF38, 0x30, 0x18C0, 0x0],
-                    "Demo v1.15" => &[0x6FE860, 0x30, 0xBA0,  0xC0],
-                    "Demo v1.19" => match chapter {
+                    Invalid=>n,
+                    SP => &[0x48E5DC, 0x27C, 0x28,  0x40],
+                    D109 | D110 => &[0x6FCF38, 0x30, 0x18C0, 0x0],
+                    D115 => &[0x6FE860, 0x30, 0xBA0,  0xC0],
+                    D119 => match chapter {
                         1 => &[0x6A1CA8, 0x48, 0x10, 0x32F0, 0x0],
                         2 => &[0x6A1CA8, 0x48, 0x10, 0x7790, 0x0],
                         _ => n
                     }
-                    "CH1-4 v1.02" => match chapter {
+                    Ch4_v102 => match chapter {
                         1 => &[0x6A1CA8, 0x48, 0x10,  0x1E40, 0x10],
                         2 => &[0x6A1CA8, 0x48,  0x10,  0x7870, 0x0],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         1 => &[0x6A9CA8, 0x48, 0x10,  0x1E40, 0x10],
                         2 => &[0x6A9CA8, 0x48,  0x10,  0x7870, 0x0],
                         5 => &[0x6A9CA8, 0x48,  0x10,   0x150,  0x20],
                         _ => n
                     }
-                    _ => n,
                 });
 
                 let mut msc_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x48E5DC, 0x27C, 0x28,  0x140],
-                    "Demo v1.09" | "Demo v1.10" => &[0x6FCF38, 0x30, 0x354C, 0x0],
-                    "Demo v1.15" => &[0x6FE860, 0x30, 0x17AC, 0x0],
-                    "Demo v1.19" => match chapter {
+                    Invalid=>n,
+                    SP => &[0x48E5DC, 0x27C, 0x28,  0x140],
+                    D109 | D110 => &[0x6FCF38, 0x30, 0x354C, 0x0],
+                    D115 => &[0x6FE860, 0x30, 0x17AC, 0x0],
+                    D119 => match chapter {
                         1 => &[0x6A1CA8, 0x48, 0x10, 0x32F0, 0xF0],
                         2 => &[0x6A1CA8, 0x48, 0x10, 0x7790, 0x130],
                         _ => n
                     }
-                    "CH1-4 v1.02" => match chapter {
+                    Ch4_v102 => match chapter {
                         1 => &[0x6A1CA8, 0x48, 0x10,  0x1E40, 0x100],
                         2 => &[0x6A1CA8, 0x48,  0x10,  0x7310, 0x0],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         1 => &[0x6A9CA8, 0x48, 0x10,  0x1E40, 0x100],
                         2 => &[0x6A9CA8, 0x48,  0x10,  0x7310, 0x0],
                         _ => n
                     }
-                    _ => n
                 });
 
                 //globals with chapter-specific relevance (e.g. flags)
 
                 let mut knight_result_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
                     3 => match version {
-                        "CH1-4 v1.02" => &[0x6A1CA8, 0x48,  0x10,   0x6A70, 0x0,  0x90, 0x4170],
-                        "CH1-5 v247" => &[0x6A9CA8, 0x48,  0x10,   0x6A70, 0x0,  0x90, 0x4170],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119 => n,
+                        Ch4_v102 => &[0x6A1CA8, 0x48,  0x10,   0x6A70, 0x0,  0x90, 0x4170],
+                        Ch5_v244 | Ch5_v247 => &[0x6A9CA8, 0x48,  0x10,   0x6A70, 0x0,  0x90, 0x4170],
                     }
                     _ => n
                 });
 
                 let mut pink_coins_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
                     5 => match version {
-                        "CH1-5 v247" => &[0x6A9CA8, 0x48,  0x10,   0x6BA0, 0x0,  0x90, 0x5200],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119|Ch4_v102 => n,
+                        Ch5_v244 => &[0x6A9CA8, 0x48,  0x10,   0x6BB0, 0x0,  0x90, 0x5200],
+                        Ch5_v247 => &[0x6A9CA8, 0x48,  0x10,   0x6BA0, 0x0,  0x90, 0x5200],
                     }
                     _ => n
                 });
@@ -898,52 +931,51 @@ async fn main() {
                 //recurring objects across chapters
 
                 let mut text_ptr1 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match version {
-                    "Demo v1.09" |
-                    "Demo v1.10" => &[0x6FCE4C, 0x8,  0x144, 0x24, 0x10, 0x5A0, 0x0, 0x0, 0x0],
-                    "Demo v1.15" => &[0x6FE774, 0x8,  0x144, 0x24, 0x10, 0x0, 0x0, 0x0, 0x0],
-                    "Demo v1.19" => match chapter {
+                    Invalid|SP => n,
+                    D109 | D110 => &[0x6FCE4C, 0x8,  0x144, 0x24, 0x10, 0x5A0, 0x0, 0x0, 0x0],
+                    D115 => &[0x6FE774, 0x8,  0x144, 0x24, 0x10, 0x0, 0x0, 0x0, 0x0],
+                    D119 => match chapter {
                         1 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0xF0, 0x0, 0x0, 0x0],
                         2 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x5F0, 0x0, 0x0, 0x0],
                         _ => n
                     }
-                    "CH1-4 v1.02" => match chapter {
+                    Ch4_v102 => match chapter {
                         1 => &[0x8C2008, 0x10, 0x1A0, 0x48,   0x10,  0x390, 0x0, 0x0, 0x0],
                         2 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x6F0, 0x0,   0x0,  0x0],
                         4 => &[0x8C2008, 0x10,  0x1A0,  0x48,   0x10,  0x300, 0x0,   0x0, 0x0],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         1 => &[0x8CE220, 0x10, 0x1A0, 0x48,   0x10,  0x390, 0x0, 0x0, 0x0],
                         2 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x6F0, 0x0,   0x0,  0x0],
                         4 => &[0x8CE220, 0x10,  0x1A0,  0x48,   0x10,  0x310, 0x0,   0x0,  0x0],
                         _ => n
                     }
-                    _ => n
                 });
 
                 let mut text_ptr2 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
                     2 => match version {
-                        "Demo v1.19" => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x6D0, 0x0, 0x0, 0x0],
-                        "CH1-4 v1.02" => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x700, 0x0,   0x0,  0x0],
-                        "CH1-5 v247" => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x700, 0x0,   0x0,  0x0],
-                        _ => n
+                        Invalid|SP|D109|D110|D115 => n,
+                        D119 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x6D0, 0x0, 0x0, 0x0],
+                        Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x700, 0x0,   0x0,  0x0],
+                        Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x700, 0x0,   0x0,  0x0],
                     }
                     _ => n
                 });
                 let mut text_ptr3 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
                     2 => match version {
-                        "Demo v1.19" => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x6F0, 0x0, 0x0, 0x0],
-                        "CH1-4 v1.02" => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x710, 0x0,   0x0,  0x0],
-                        "CH1-5 v247" => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x710, 0x0,   0x0,  0x0],
-                        _ => n
+                        Invalid|SP|D109|D110|D115 => n,
+                        D119 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x6F0, 0x0, 0x0, 0x0],
+                        Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x710, 0x0,   0x0,  0x0],
+                        Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x710, 0x0,   0x0,  0x0],
                     }
                     _ => n
                 });
                 let mut text_ptr4 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
                     2 => match version {
-                        "CH1-4 v1.02" => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x7E0, 0x0,   0x0,  0x0],
-                        "CH1-5 v247" => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x7E0, 0x0,   0x0,  0x0],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119 => n,
+                        Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x7E0, 0x0,   0x0,  0x0],
+                        Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x7E0, 0x0,   0x0,  0x0],
                     }
                     _ => n
                 });
@@ -951,27 +983,27 @@ async fn main() {
 
                 let mut susie_sprite_ptr = VarTrack::<i32>::new(DELTARUNE,ps,match chapter {
                     4 => match version {
-                        "CH1-4 v1.02" => &[0x69FA98, 0x0,   0x1008, 0x50,   0x158, 0x10,  0xBC],
-                        "CH1-5 v247" => &[0x6A7A98, 0x0,   0x1018, 0x50,   0x158, 0x10,  0xBC],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119 => n,
+                        Ch4_v102 => &[0x69FA98, 0x0,   0x1008, 0x50,   0x158, 0x10,  0xBC],
+                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1018, 0x50,   0x158, 0x10,  0xBC],
                     }
                     _ => n
                 });
 
                 let mut player_x_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
                     4 => match version {
-                        "CH1-4 v1.02" => &[0x69FA98, 0x0,   0x198,  0x0,    0x50,  0x158, 0x10,  0xE8],
-                        "CH1-5 v247" => &[0x6A7A98, 0x0,   0x1A8,  0x0,    0x50,  0x158, 0x10,  0xE8],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119 => n,
+                        Ch4_v102 => &[0x69FA98, 0x0,   0x198,  0x0,    0x50,  0x158, 0x10,  0xE8],
+                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1A8,  0x0,    0x50,  0x158, 0x10,  0xE8],
                     }
                     _ => n
                 });
 
                 let mut player_y_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
                     4 => match version {
-                        "CH1-4 v1.02" => &[0x69FA98, 0x0,   0x198,  0x0,    0x50,  0x158, 0x10,  0xEC],
-                        "CH1-5 v247" => &[0x6A7A98, 0x0,   0x1A8,  0x0,    0x50,  0x158, 0x10,  0xEC],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119 => n,
+                        Ch4_v102 => &[0x69FA98, 0x0,   0x198,  0x0,    0x50,  0x158, 0x10,  0xEC],
+                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1A8,  0x0,    0x50,  0x158, 0x10,  0xEC],
                     }
                     _ => n
                 });
@@ -981,41 +1013,41 @@ async fn main() {
                 //Ch1 objects
 
                 let mut great_door_con_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x48BDEC, 0xC,  0x60, 0x10, 0x10,  0x0],
-                    "Demo v1.09" | "Demo v1.10" => &[0x6EF220, 0x84, 0x24,  0x10, 0x18,  0x0],
-                    "Demo v1.15" => &[0x6F0B48, 0x84, 0x24,  0x10, 0x18, 0x0],
-                    "Demo v1.19" => match chapter {
+                    Invalid => n,
+                    SP => &[0x48BDEC, 0xC,  0x60, 0x10, 0x10,  0x0],
+                    D109 | D110 => &[0x6EF220, 0x84, 0x24,  0x10, 0x18,  0x0],
+                    D115 => &[0x6F0B48, 0x84, 0x24,  0x10, 0x18, 0x0],
+                    D119 => match chapter {
                         1 => &[0x8B2790, 0xE0,  0x48,  0x10, 0x0,   0x0],
                         _ => n
                     }
-                    "CH1-4 v1.02" => match chapter {
+                    Ch4_v102 => match chapter {
                         1 => &[0x8B2790, 0xE0, 0x48,  0x10,   0x30,  0x0],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         1 => &[0x8BA790, 0xE0, 0x48,  0x10,   0x30,  0x0],
                         _ => n
                     }
-                    _ => n
                 });
 
                 let mut king_pos_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x6AEB80, 0x4, 0x178, 0x80, 0xC8, 0x8, 0xB4],
-                    "Demo v1.09" | "Demo v1.10" => &[0x6F1394, 0x4, 0x140, 0x68, 0x3C, 0x8, 0xB0],
-                    "Demo v1.15" => &[0x6F2CBC, 0x4, 0x140, 0x68, 0x3C, 0x8, 0xB0],
-                    "Demo v1.19" => match chapter {
+                    Invalid => n,
+                    SP => &[0x6AEB80, 0x4, 0x178, 0x80, 0xC8, 0x8, 0xB4],
+                    D109 | D110 => &[0x6F1394, 0x4, 0x140, 0x68, 0x3C, 0x8, 0xB0],
+                    D115 => &[0x6F2CBC, 0x4, 0x140, 0x68, 0x3C, 0x8, 0xB0],
+                    D119 => match chapter {
                         1 => &[0x69FA98, 0x0, 0x530, 0x50, 0x158, 0x10, 0xE8],
                         _ => n
                     }
-                    "CH1-4 v1.02" => match chapter {
+                    Ch4_v102 => match chapter {
                         1 => &[0x69FA98, 0x0,  0x560, 0x50,   0x158, 0x10,  0xE8],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         1 => &[0x6A7A98, 0x0,  0x560, 0x50,   0x158, 0x10,  0xE8],
                         _ => n
                     }
-                    _ => n
                 });
 
 
@@ -1023,19 +1055,19 @@ async fn main() {
                 //SP-specific object checks
 
                 let mut jevil_dance_ptr1 = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x48BDEC, 0x78, 0x60, 0x10, 0x10,  0x0],
+                    SP => &[0x48BDEC, 0x78, 0x60, 0x10, 0x10,  0x0],
                     _ => n
                 });
                 let mut jevil_dance_ptr2 = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x48BDEC, 0x7C, 0x60, 0x10, 0x10,  0x0],
+                    SP => &[0x48BDEC, 0x7C, 0x60, 0x10, 0x10,  0x0],
                     _ => n
                 });
                 let mut final_textbox_ptr1 = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x48BDEC, 0x98, 0x60, 0x10, 0x274, 0x0],
+                    SP => &[0x48BDEC, 0x98, 0x60, 0x10, 0x274, 0x0],
                     _ => n
                 });
                 let mut final_textbox_ptr2 = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "SURVEY_PROGRAM" => &[0x48BDEC, 0x9C, 0x60, 0x10, 0x274, 0x0],
+                    SP => &[0x48BDEC, 0x9C, 0x60, 0x10, 0x274, 0x0],
                     _ => n
                 });
 
@@ -1044,40 +1076,40 @@ async fn main() {
                 //Ch2 objects
 
                 let mut loaded_disk_bg_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "Demo v1.09" => &[0x6EF220, 0x84, 0x24,  0x10, 0x3D8, 0x0],
-                    "Demo v1.10" => &[0x6EF220, 0x84, 0x24,  0x10, 0x87C, 0x0],
-                    "Demo v1.15" => &[0x6F0B48, 0x84, 0x24,  0x10, 0x0,  0x0],
-                    "Demo v1.19" => match chapter {
+                    Invalid|SP => n,
+                    D109 => &[0x6EF220, 0x84, 0x24,  0x10, 0x3D8, 0x0],
+                    D110 => &[0x6EF220, 0x84, 0x24,  0x10, 0x87C, 0x0],
+                    D115 => &[0x6F0B48, 0x84, 0x24,  0x10, 0x0,  0x0],
+                    D119 => match chapter {
                         2 => &[0x8B2790, 0xE0,  0x48,  0x10, 0x3C0, 0x0],
                         _ => n
                     }
-                    "Ch1-4 v1.02" => match chapter {
+                    Ch4_v102 => match chapter {
                         2 => &[0x8B2790, 0xE0,  0x48,  0x10,   0xC70, 0x0],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         2 => &[0x8BA790, 0xE0,  0x48,  0x10,   0xCA0, 0x0],
                         _ => n
                     }
-                    _ => n
                 });
 
                 let mut snowgrave_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    "Demo v1.09" | "Demo v1.10" => &[0x6EF220, 0xF4, 0x27C, 0x6C, 0x5C,  0x20, 0x144, 0x24, 0x10, 0xC0, 0x0],
-                    "Demo v1.15" => &[0x6F0B48, 0xF4, 0x27C, 0x6C, 0x5C, 0x20, 0x144, 0x24, 0x10, 0x120, 0x0],
-                    "Demo v1.19" => match chapter {
+                    Invalid|SP => n,
+                    D109 | D110 => &[0x6EF220, 0xF4, 0x27C, 0x6C, 0x5C,  0x20, 0x144, 0x24, 0x10, 0xC0, 0x0],
+                    D115 => &[0x6F0B48, 0xF4, 0x27C, 0x6C, 0x5C, 0x20, 0x144, 0x24, 0x10, 0x120, 0x0],
+                    D119 => match chapter {
                         2 => &[0x8B2790, 0x1A0, 0x3B0, 0x88, 0x70,  0x38, 0x1A0, 0x48, 0x10, 0x3D0, 0x0],
                         _ => n
                     }
-                    "CH1-4 v1.02" => match chapter {
+                    Ch4_v102 => match chapter {
                         2 => &[0x8B2790, 0x1A0, 0x3B0, 0x88,   0x70,  0x38,  0x1A0, 0x48, 0x10, 0xA0, 0x0],
                         _ => n
                     }
-                    "CH1-5 v247" => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         2 => &[0x8BA790, 0x1A0, 0x3B0, 0x88,   0x70,  0x38,  0x1A0, 0x48, 0x10, 0x80, 0x0],
                         _ => n
                     }
-                    _ => n
                 });
 
 
@@ -1088,17 +1120,17 @@ async fn main() {
 
                 let mut egg_timer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
                     3 => match version {
-                        "CH1-4 v1.02" => &[0x8B2790, 0x1E8, 0x530,  0x38,   0x48, 0x10, 0x290, 0x0],
-                        "CH1-5 v247" => &[0x8BA790, 0x1E8, 0x40,   0x38,   0x48, 0x10, 0x330, 0x0],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119 => n,
+                        Ch4_v102 => &[0x8B2790, 0x1E8, 0x530,  0x38,   0x48, 0x10, 0x290, 0x0],
+                        Ch5_v244 | Ch5_v247 => &[0x8BA790, 0x1E8, 0x40,   0x38,   0x48, 0x10, 0x330, 0x0],
                     }
                     _ => n
                 });
                 let mut mantle_outro_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
                     3 => match version {
-                        "CH1-4 v1.02" => &[0x69FA98, 0x0,   0x19B0, 0x18,   0x50, 0x10, 0xD0],
-                        "CH1-5 v247" => &[0x6A7A98, 0x0,   0x19B0, 0x18,   0x50, 0x10, 0xD0],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119 => n,
+                        Ch4_v102 => &[0x69FA98, 0x0,   0x19B0, 0x18,   0x50, 0x10, 0xD0],
+                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x19B0, 0x18,   0x50, 0x10, 0xD0],
                     }
                     _ => n
                 });
@@ -1109,9 +1141,9 @@ async fn main() {
 
                 let mut mike_action_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
                     4 => match version {
-                        "CH1-4 v1.02" => &[0x8B2790, 0x1A0, 0x2F0,  0x90,   0x78,  0x38,  0x198, 0x48, 0x10, 0x140, 0x0],
-                        "CH1-5 v247" => &[],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119 => n,
+                        Ch4_v102 => &[0x8B2790, 0x1A0, 0x2F0,  0x90,   0x78,  0x38,  0x198, 0x48, 0x10, 0x140, 0x0],
+                        Ch5_v244 | Ch5_v247 => &[],
                     }
                     _ => n
                 });
@@ -1121,8 +1153,8 @@ async fn main() {
 
                 let mut crt_start_ptr = VarTrack::<i32>::new(DELTARUNE,ps,match chapter {
                     5 => match version {
-                        "CH1-5 v247" => &[0x6A7A98, 0x0,   0x1910, 0x8,    0x18, 0x68, 0x10,  0xE4],
-                        _ => n
+                        Invalid|SP|D109|D110|D115|D119|Ch4_v102 => n,
+                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1910, 0x8,    0x18, 0x68, 0x10,  0xE4],
                     }
                     _ => n
                 });
@@ -1144,7 +1176,7 @@ async fn main() {
                 loop {
                     settings.update();
 
-                    if ps == ps32 && version != "SURVEY_PROGRAM" {
+                    if matches!(version,D109|D110|D115) {
                         chapter = old_chapter_ptr.update_value(&process).current as i32;
                     }
                     timer::set_variable_int("Chapter",chapter);
@@ -1314,13 +1346,13 @@ async fn main() {
                                         "room_castle_darkdoor" if great_door_con.bytes_changed_from_to(&7.0,&21.0) => "ch1_castle_town_door",
                                         "room_man" if msc.bytes_changed_to(&601.0) && choice.current == 0.0 => "ch1_egg",
                                         "room_cc_joker" if match version {
-                                            "SURVEY_PROGRAM" => jevil_dance1.current == 4.0 || jevil_dance2.current == 4.0,
+                                            SP => jevil_dance1.current == 4.0 || jevil_dance2.current == 4.0,
                                             _ => mus.old.validate_utf8().unwrap_or_default().ends_with(r"mus\joker.ogg") && mus.current.matches(""),
                                         } => "ch1_beat_jevil",
                                         "room_cc_kingbattle" if king_pos.old == 680.0 && king_pos.current >= 1020.0 && king_pos.current <= 1030.0 => "ch1_king",
 
                                         "room_krisroom" if match version {
-                                            "SURVEY_PROGRAM" => !SPEndingTriggered && plot.current == 251.0 && (final_textbox1.bytes_changed_from(&2.0) || final_textbox2.bytes_changed_from(&2.0) || filechoice.current > 2.0),
+                                            SP => !SPEndingTriggered && plot.current == 251.0 && (final_textbox1.bytes_changed_from(&2.0) || final_textbox2.bytes_changed_from(&2.0) || filechoice.current > 2.0),
                                           _ => text_close_check(&text,r"* (You decided to go to bed.)/%",r"＊ (ねむることにした)/%")
                                         } => "ch1_ending",
 
@@ -1342,11 +1374,11 @@ async fn main() {
 
                                 //variables only in versions with change_game
                                 let text_all = match version {
-                                    "Demo v1.09" | "Demo v1.10" | "Demo v1.15" => vec![text],
-                                    "Demo v1.19" => vec![text,text_ptr2.update_value(&process),text_ptr3.update_value(&process)],
-                                    "CH1-4 v1.02" | "CH1-5 v247" => vec![text,text_ptr2.update_value(&process),text_ptr3.update_value(&process),text_ptr4.update_value(&process)],
-                                    "invalid" => vec![text],
-                                    _ => unreachable!() //new versions need explicit setup here
+                                    SP => unreachable!(),
+                                    Invalid => vec![text],
+                                    D109 | D110 | D115 => vec![text],
+                                    D119 => vec![text,text_ptr2.update_value(&process),text_ptr3.update_value(&process)],
+                                    Ch4_v102 | Ch5_v244 | Ch5_v247 => vec![text,text_ptr2.update_value(&process),text_ptr3.update_value(&process),text_ptr4.update_value(&process)],
                                 };
                                 for i in 1..text_all.len() {
                                     timer::set_variable(format!("Text ({})",i+1).as_str(),text_all[i].current.validate_utf8().unwrap_or_default());
