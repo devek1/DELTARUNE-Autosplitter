@@ -18,6 +18,11 @@ jobs:
       - name: Checkout Commit
         uses: actions/checkout@v4
 
+      - name: Delete Latest tag
+        run: gh release delete latest --cleanup-tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Rust
         uses: hecrj/setup-rust-action@v2
         with:
@@ -27,11 +32,6 @@ jobs:
       - name: Build
         run: |
           cargo b --release --locked
-
-      - name: Delete Latest tag
-        run: gh release delete latest --cleanup-tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release
         if: github.ref == 'refs/heads/master'
