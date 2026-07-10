@@ -769,7 +769,6 @@ async fn main() {
                     D109|D110 => &[0x4DFF58, 0x0,  0x44,  0x0],
                     D115 => &[0x4E1878, 0x0,  0x0,   0x0],
                     D119 | Ch4_v102 => &[0x6A2F90, 0x0,  0x0,  0x0],
-
                     Ch5_v244 | Ch5_v247 => &[0x6AAF90, 0x0,  0x0,  0x0],
                 });
 
@@ -819,7 +818,7 @@ async fn main() {
 
                 //DOESN'T WORK FOR CHAPTER 1?
                 let mut fighting_ptr = VarTrack::<f64>::new(DELTARUNE,ps, match version {
-                    SP => n,
+                    Invalid|SP => n,
                     D109 | D110 => &[0x6FCF38, 0x30, 0x4F8,  0x0],
                     D115 => &[0x6FE860, 0x30, 0xA758, 0x0],
                     D119 => match chapter {
@@ -834,7 +833,7 @@ async fn main() {
                         4 => &[0x6A1CA8, 0x48,  0x10,   0x72B0, 0x370],
                         _ => n
                     }
-                    Ch5_v247 => match chapter {
+                    Ch5_v244 | Ch5_v247 => match chapter {
                         1 => n, //&[0x6A9CA8, 0x48, 0x10,  0x1E40, 0x740], (points to Dark Dollars instead)
                         2 => &[0x6A9CA8, 0x48,  0x10,  0x100,  0x0],
                         3 => &[0x6A9CA8, 0x48,  0x10,   0x1190, 0x370],
@@ -842,7 +841,6 @@ async fn main() {
                         5 => &[0x6A9CA8, 0x48,  0x10,   0x820,  0x70],
                         _ => n
                     }
-                    _ => n,
                 });
 
                 let mut plot_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
