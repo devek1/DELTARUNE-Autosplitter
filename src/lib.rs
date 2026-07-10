@@ -1311,7 +1311,7 @@ async fn main() {
                                     },false);
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
-                                        "room_castle_darkdoor" if great_door_con.bytes_changed_to(&21.0) => "ch1_castle_town_door",
+                                        "room_castle_darkdoor" if great_door_con.bytes_changed_from_to(&7.0,&21.0) => "ch1_castle_town_door",
                                         "room_man" if msc.bytes_changed_to(&601.0) && choice.current == 0.0 => "ch1_egg",
                                         "room_cc_joker" if match version {
                                             "SURVEY_PROGRAM" => jevil_dance1.current == 4.0 || jevil_dance2.current == 4.0,
