@@ -6,14 +6,14 @@ use asr::{
     watcher::{Watcher,Pair}, Address, string::ArrayCString, signature::Signature, timer, timer::TimerState, time_util::Instant,
     settings::{Map,Gui,gui::Title}, file_format::pe
 };
-use std::collections::{HashSet};
+use std::collections::{HashMap, HashSet};
 use core::time::Duration;
+use std::ops::Add;
 use crate::Ver::{*};
 
 asr::async_main!(stable);
 
 enum Ver {
-    Invalid,
     SP,
     D109,
     D110,
@@ -667,10 +667,12 @@ async fn main() {
                     "80A63475EF69529B612F9DCA75AF4CC5" | //v247 30tbps
                     "3217F3BFE82C3E4AA8EE2E9E3A4F4E14" | //v247 Item Tracker
                     "21CDD09EEADBCC77535AB2BB3412259A" => Ch5_v247, //v247 OST tracker
-                    _ => Invalid,
+                    _ => {
+                        timer::set_variable("version","Invalid");
+                        loop {next_tick().await;}
+                    },
                 };
                 timer::set_variable("version", match version {
-                    Invalid => "Invalid",
                     SP => "SURVEY_PROGRAM",
                     D109 => "Demo v1.09",
                     D110 => "Demo v1.10",
@@ -680,8 +682,6 @@ async fn main() {
                     Ch5_v244 => "Ch1-5, Ch5 v0.0.244",
                     Ch5_v247 => "Ch1-5, Ch5 v0.0.247",
                 });
-
-                if matches!(version,Invalid) { loop { next_tick().await; } }
 
                 let ps = match version {
                     SP | D109 | D110 | D115 | D119 => ps32,
@@ -695,7 +695,7 @@ async fn main() {
                     let mut _dir : ArrayCString<256>;
                     loop {
                         _dir = process.read_pointer_path::<ArrayCString<256>>(DELTARUNE, ps, match version {
-                            Invalid|SP|D109|D110|D115 => n,
+                            SP|D109|D110|D115 => n,
                             Ch5_v244 | Ch5_v247 => &[0x8BA818,0],
                             Ch4_v102 => &[0x8B2818,0],
                             D119 => &[0x8D06E0,0],
@@ -754,10 +754,44 @@ async fn main() {
                 let mut room_watch = Watcher::<i32>::new();
                 let mut room_name_watch = Watcher::<ArrayCString<64>>::new();
 
+                let mut string_literals = HashMap::<u32,String>::new();
+                let mut string_ids = HashMap::<String,u32>::new();
+                {
+                    let sListPtr = process.read_pointer(DELTARUNE.add(0x5FCD08),ps).unwrap();
+                    let strNum = process.read::<u32>(sListPtr.add_signed(-0x18)).unwrap();
+                    asr::print_message(format!("Number of strings: {}",strNum).as_str());
+                    for i in 0..strNum {
+                        //let entryAddr = process.read_pointer(sListPtr.add(8*i as u64), ps).unwrap();
+                        let namePtr = process.read_pointer(sListPtr.add(8*i as u64), ps).unwrap();
+                        let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();
+                        let name = _name.validate_utf8().unwrap_or_default();
+                        if name != "" {
+                            string_ids.insert(name.to_string(),i);
+                            string_literals.insert(i,name.to_string());
+                            if matches!(name,"plot"|"con"|"event") || i==7 {
+                                asr::print_message(format!("{} found at index {}",name,i).as_str());
+                            }
+                        }
+                    }
+                }
+                //asr::print_message(format!("plot's String index is {}",string_ids["plot"]).as_str());
+
+                let mut obj_addr_map = HashMap::<String,Address>::new();
+                {
+                    let objArrBase = process.read_pointer(DELTARUNE.add(0x6A7A98),ps).unwrap();
+                    let objNum = process.read::<u32>(objArrBase.add(0xC)).unwrap() as u64;
+                    asr::print_message(format!("Number of objects: {}",objNum).as_str());
+                    let arr = process.read_pointer(objArrBase,ps).unwrap();
+                    for i in 0..objNum {
+                        let objAddr = process.read_pointer(arr.add(i*0x10),ps).unwrap();
+                        let name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[0x18,0x0]).unwrap();
+                    }
+                }
+
                 // sound stuff (pointer only varies by runner version)
 
                 let mut snd_ptr = VarTrack::<ArrayCString<256>>::new(DELTARUNE,ps,match version {
-                    Invalid | SP => n,
+                    SP => n,
                     D109|D110 => &[0x4E0794, 0x58, 0xC0,  0x40, 0x0],
                     D115 => &[0x4E20B4, 0x58, 0xC0,  0x40, 0x0],
                     D119 | Ch4_v102 => &[0x6A3818, 0x60, 0xD0, 0x58, 0x0],
@@ -765,7 +799,7 @@ async fn main() {
                 });
 
                 let mut mus_ptr = VarTrack::<ArrayCString<256>>::new(DELTARUNE,ps,match version {
-                    Invalid | SP => n,
+                    SP => n,
                     D109|D110 => &[0x4DFF58, 0x0,  0x44,  0x0],
                     D115 => &[0x4E1878, 0x0,  0x0,   0x0],
                     D119 | Ch4_v102 => &[0x6A2F90, 0x0,  0x0,  0x0],
@@ -776,7 +810,7 @@ async fn main() {
                 //DEVICE_NAMER.EVENT
 
                 let mut namer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid|SP => n,
+                    SP => n,
                     D109 => &[0x6EF220, 0xD4, 0x5C,  0x20, 0x24,  0x10, 0x9C,  0x0],
                     D110 => &[0x6EF220, 0xD4, 0x5C,  0x20, 0x24,  0x10, 0x2F4, 0x0],
                     D115 => &[0x6F0B48, 0xD4, 0x5C,  0x20, 0x24, 0x10, 0xFC,  0x0],
@@ -818,7 +852,7 @@ async fn main() {
 
                 //DOESN'T WORK FOR CHAPTER 1?
                 let mut fighting_ptr = VarTrack::<f64>::new(DELTARUNE,ps, match version {
-                    Invalid|SP => n,
+                    SP => n,
                     D109 | D110 => &[0x6FCF38, 0x30, 0x4F8,  0x0],
                     D115 => &[0x6FE860, 0x30, 0xA758, 0x0],
                     D119 => match chapter {
@@ -844,7 +878,7 @@ async fn main() {
                 });
 
                 let mut plot_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid|D109|D110|D115|D119 => n,
+                    D109|D110|D115|D119 => n,
                     SP => &[0x48E5DC, 0x27C, 0x488, 0x500],
                     Ch4_v102 => match chapter {
                         3 => &[0x6A1CA8, 0x48,  0x10,   0x1000, 0x250],
@@ -859,7 +893,6 @@ async fn main() {
                 });
 
                 let mut choicer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid=>n,
                     SP => &[0x48E5DC, 0x27C, 0x28,  0x40],
                     D109 | D110 => &[0x6FCF38, 0x30, 0x18C0, 0x0],
                     D115 => &[0x6FE860, 0x30, 0xBA0,  0xC0],
@@ -882,7 +915,6 @@ async fn main() {
                 });
 
                 let mut msc_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid=>n,
                     SP => &[0x48E5DC, 0x27C, 0x28,  0x140],
                     D109 | D110 => &[0x6FCF38, 0x30, 0x354C, 0x0],
                     D115 => &[0x6FE860, 0x30, 0x17AC, 0x0],
@@ -907,7 +939,7 @@ async fn main() {
 
                 let mut knight_result_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
                     3 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
+                        SP|D109|D110|D115|D119 => n,
                         Ch4_v102 => &[0x6A1CA8, 0x48,  0x10,   0x6A70, 0x0,  0x90, 0x4170],
                         Ch5_v244 | Ch5_v247 => &[0x6A9CA8, 0x48,  0x10,   0x6A70, 0x0,  0x90, 0x4170],
                     }
@@ -916,7 +948,7 @@ async fn main() {
 
                 let mut pink_coins_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
                     5 => match version {
-                        Invalid|SP|D109|D110|D115|D119|Ch4_v102 => n,
+                        SP|D109|D110|D115|D119|Ch4_v102 => n,
                         Ch5_v244 => &[0x6A9CA8, 0x48,  0x10,   0x6BB0, 0x0,  0x90, 0x5200],
                         Ch5_v247 => &[0x6A9CA8, 0x48,  0x10,   0x6BA0, 0x0,  0x90, 0x5200],
                     }
@@ -929,7 +961,7 @@ async fn main() {
                 //recurring objects across chapters
 
                 let mut text_ptr1 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match version {
-                    Invalid|SP => n,
+                    SP => n,
                     D109 | D110 => &[0x6FCE4C, 0x8,  0x144, 0x24, 0x10, 0x5A0, 0x0, 0x0, 0x0],
                     D115 => &[0x6FE774, 0x8,  0x144, 0x24, 0x10, 0x0, 0x0, 0x0, 0x0],
                     D119 => match chapter {
@@ -953,7 +985,7 @@ async fn main() {
 
                 let mut text_ptr2 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
                     2 => match version {
-                        Invalid|SP|D109|D110|D115 => n,
+                        SP|D109|D110|D115 => n,
                         D119 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x6D0, 0x0, 0x0, 0x0],
                         Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x700, 0x0,   0x0,  0x0],
                         Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x700, 0x0,   0x0,  0x0],
@@ -962,7 +994,7 @@ async fn main() {
                 });
                 let mut text_ptr3 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
                     2 => match version {
-                        Invalid|SP|D109|D110|D115 => n,
+                        SP|D109|D110|D115 => n,
                         D119 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x6F0, 0x0, 0x0, 0x0],
                         Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x710, 0x0,   0x0,  0x0],
                         Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x710, 0x0,   0x0,  0x0],
@@ -971,7 +1003,7 @@ async fn main() {
                 });
                 let mut text_ptr4 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
                     2 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
+                        SP|D109|D110|D115|D119 => n,
                         Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x7E0, 0x0,   0x0,  0x0],
                         Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x7E0, 0x0,   0x0,  0x0],
                     }
@@ -981,7 +1013,7 @@ async fn main() {
 
                 let mut susie_sprite_ptr = VarTrack::<i32>::new(DELTARUNE,ps,match chapter {
                     4 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
+                        SP|D109|D110|D115|D119 => n,
                         Ch4_v102 => &[0x69FA98, 0x0,   0x1008, 0x50,   0x158, 0x10,  0xBC],
                         Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1018, 0x50,   0x158, 0x10,  0xBC],
                     }
@@ -990,7 +1022,7 @@ async fn main() {
 
                 let mut player_x_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
                     4 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
+                        SP|D109|D110|D115|D119 => n,
                         Ch4_v102 => &[0x69FA98, 0x0,   0x198,  0x0,    0x50,  0x158, 0x10,  0xE8],
                         Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1A8,  0x0,    0x50,  0x158, 0x10,  0xE8],
                     }
@@ -999,7 +1031,7 @@ async fn main() {
 
                 let mut player_y_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
                     4 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
+                        SP|D109|D110|D115|D119 => n,
                         Ch4_v102 => &[0x69FA98, 0x0,   0x198,  0x0,    0x50,  0x158, 0x10,  0xEC],
                         Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1A8,  0x0,    0x50,  0x158, 0x10,  0xEC],
                     }
@@ -1011,7 +1043,6 @@ async fn main() {
                 //Ch1 objects
 
                 let mut great_door_con_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid => n,
                     SP => &[0x48BDEC, 0xC,  0x60, 0x10, 0x10,  0x0],
                     D109 | D110 => &[0x6EF220, 0x84, 0x24,  0x10, 0x18,  0x0],
                     D115 => &[0x6F0B48, 0x84, 0x24,  0x10, 0x18, 0x0],
@@ -1030,7 +1061,6 @@ async fn main() {
                 });
 
                 let mut king_pos_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match version {
-                    Invalid => n,
                     SP => &[0x6AEB80, 0x4, 0x178, 0x80, 0xC8, 0x8, 0xB4],
                     D109 | D110 => &[0x6F1394, 0x4, 0x140, 0x68, 0x3C, 0x8, 0xB0],
                     D115 => &[0x6F2CBC, 0x4, 0x140, 0x68, 0x3C, 0x8, 0xB0],
@@ -1074,7 +1104,7 @@ async fn main() {
                 //Ch2 objects
 
                 let mut loaded_disk_bg_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid|SP => n,
+                    SP => n,
                     D109 => &[0x6EF220, 0x84, 0x24,  0x10, 0x3D8, 0x0],
                     D110 => &[0x6EF220, 0x84, 0x24,  0x10, 0x87C, 0x0],
                     D115 => &[0x6F0B48, 0x84, 0x24,  0x10, 0x0,  0x0],
@@ -1093,7 +1123,7 @@ async fn main() {
                 });
 
                 let mut snowgrave_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid|SP => n,
+                    SP => n,
                     D109 | D110 => &[0x6EF220, 0xF4, 0x27C, 0x6C, 0x5C,  0x20, 0x144, 0x24, 0x10, 0xC0, 0x0],
                     D115 => &[0x6F0B48, 0xF4, 0x27C, 0x6C, 0x5C, 0x20, 0x144, 0x24, 0x10, 0x120, 0x0],
                     D119 => match chapter {
@@ -1118,7 +1148,7 @@ async fn main() {
 
                 let mut egg_timer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
                     3 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
+                        SP|D109|D110|D115|D119 => n,
                         Ch4_v102 => &[0x8B2790, 0x1E8, 0x530,  0x38,   0x48, 0x10, 0x290, 0x0],
                         Ch5_v244 | Ch5_v247 => &[0x8BA790, 0x1E8, 0x40,   0x38,   0x48, 0x10, 0x330, 0x0],
                     }
@@ -1126,7 +1156,7 @@ async fn main() {
                 });
                 let mut mantle_outro_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
                     3 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
+                        SP|D109|D110|D115|D119 => n,
                         Ch4_v102 => &[0x69FA98, 0x0,   0x19B0, 0x18,   0x50, 0x10, 0xD0],
                         Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x19B0, 0x18,   0x50, 0x10, 0xD0],
                     }
@@ -1139,7 +1169,7 @@ async fn main() {
 
                 let mut mike_action_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
                     4 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
+                        SP|D109|D110|D115|D119 => n,
                         Ch4_v102 => &[0x8B2790, 0x1A0, 0x2F0,  0x90,   0x78,  0x38,  0x198, 0x48, 0x10, 0x140, 0x0],
                         Ch5_v244 | Ch5_v247 => &[],
                     }
@@ -1151,7 +1181,7 @@ async fn main() {
 
                 let mut crt_start_ptr = VarTrack::<i32>::new(DELTARUNE,ps,match chapter {
                     5 => match version {
-                        Invalid|SP|D109|D110|D115|D119|Ch4_v102 => n,
+                        SP|D109|D110|D115|D119|Ch4_v102 => n,
                         Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1910, 0x8,    0x18, 0x68, 0x10,  0xE4],
                     }
                     _ => n
@@ -1373,7 +1403,6 @@ async fn main() {
                                 //variables only in versions with change_game
                                 let text_all = match version {
                                     SP => unreachable!(),
-                                    Invalid => vec![text],
                                     D109 | D110 | D115 => vec![text],
                                     D119 => vec![text,text_ptr2.update_value(&process),text_ptr3.update_value(&process)],
                                     Ch4_v102 | Ch5_v244 | Ch5_v247 => vec![text,text_ptr2.update_value(&process),text_ptr3.update_value(&process),text_ptr4.update_value(&process)],
