@@ -8,7 +8,6 @@ use asr::{
 };
 use std::collections::{HashMap, HashSet};
 use core::time::Duration;
-use std::ops::Add;
 use crate::Ver::{*};
 
 asr::async_main!(stable);
@@ -784,7 +783,11 @@ async fn main() {
                     let arr = process.read_pointer(objArrBase,ps).unwrap();
                     for i in 0..objNum {
                         let objAddr = process.read_pointer(arr.add(i*0x10),ps).unwrap();
-                        let name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[0x18,0x0]).unwrap();
+                        let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[0x18,0x0]).unwrap_or_default();
+                        let name = _name.validate_utf8().unwrap_or_default();
+                        if name != "" {
+                            obj_addr_map.insert(name.to_string(),objAddr);
+                        }
                     }
                 }
 
