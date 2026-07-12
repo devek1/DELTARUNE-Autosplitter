@@ -684,7 +684,7 @@ async fn main() {
                 if matches!(version,Invalid) { loop { next_tick().await; } }
 
                 let ps = match version {
-                    SP | D109 | D110 | D115 | D119 => ps32,
+                    SP | D109 | D110 | D115 => ps32,
                     _ => ps64
                 };
 
