@@ -8,6 +8,8 @@ use asr::{
 };
 use std::collections::{HashMap, HashSet};
 use core::time::Duration;
+use asr::future::retry;
+use crate::Textboxes::{*};
 use crate::Ver::{*};
 
 asr::async_main!(stable);
@@ -496,6 +498,150 @@ fn room_check_both(room : &Pair<ArrayCString<64>>, orig : &str, dest : &str) -> 
     room_match(room.current,dest) && room_match(room.old,orig)
 }*/
 
+struct VarFinder {
+    numAddr : Address,
+    arrAddr : Address,
+    ps : PointerSize
+}
+
+impl VarFinder {
+    fn try_new(process: &Process, ps: PointerSize, instAddr: Address) -> Option<VarFinder> {
+        let Ok(midAddr) = process.read_pointer_path::<u64>(instAddr, ps, &[0x0, 0x48]) else {
+            return None;
+        };
+        Some(VarFinder {
+            numAddr: Address::new(midAddr + 0x8),
+            arrAddr: process.read_pointer(Address::new(midAddr + 0x10), ps).unwrap(),
+            ps
+        })
+    }
+    fn new(process: &Process, ps: PointerSize, instAddr: Address) -> VarFinder {
+        let midAddr = process.read_pointer_path::<u64>(instAddr, ps, &[0x0, 0x48]).unwrap();
+        VarFinder {
+            numAddr: process.read_pointer(Address::new(midAddr + 0x8), ps).unwrap(),
+            arrAddr: process.read_pointer(Address::new(midAddr + 0x10), ps).unwrap(),
+            ps
+        }
+    }
+
+    //Find a pointer to a specific variable, this is used to find and store permanent pointers for global variables
+    fn findVarPtr(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> Address {
+        for i in 0..process.read::<u32>(self.numAddr).unwrap_or_default() {
+            let offset = i * 0x10;
+            let stringID = process.read::<u32>(self.arrAddr + offset + 0x8).unwrap_or_default();
+            if stringID < 100000 {
+                continue;
+            }
+            if stringsList.get(&(stringID - 100000)).unwrap_or(&String::from("")) == name {
+                process.read_pointer(self.arrAddr + offset, self.ps).unwrap_or_default();
+            }
+        }
+        Address::default()
+    }
+
+    //Populate a HashMap with pointers for variables from provided list
+    fn populatePtrMap(&self, process: &Process, stringsList: &HashMap<u32, String>, pointerMap : &mut HashMap<String,Address>, names: &[&str]) {
+        for i in 0..process.read::<u32>(self.numAddr).unwrap_or_default() {
+            let offset = i * 0x10;
+            let stringID = process.read::<u32>(self.arrAddr + offset + 0x8).unwrap_or_default();
+            if stringID < 100000 {
+                continue;
+            }
+            let Some(name) = stringsList.get(&(stringID - 100000)) else {
+                continue;
+            };
+            if names.contains(&name.as_str())  {
+                pointerMap.insert(name.clone(),process.read_pointer(self.arrAddr + offset, self.ps).unwrap_or_default());
+            }
+        }
+    }
+
+    //Immediately read first value of a variable, this is used to read variable values from instances of objects without needing
+    fn readVar<T: bytemuck::Pod + Default>(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> T {
+        for i in 0..process.read::<u32>(self.numAddr).unwrap_or_default() {
+            let offset = i * 0x10;
+            let stringID = process.read::<u32>(self.arrAddr + offset + 0x8).unwrap_or_default();
+            if stringID < 100000 {
+                continue;
+            }
+            if stringsList.get(&(stringID - 100000)).unwrap_or(&String::from("")) == name {
+                //timer::set_variable("Address read from",process.read_pointer(self.arrAddr.add(offset as u64),self.ps).unwrap_or_default().);
+                return process.read_pointer_path::<T>(self.arrAddr, self.ps, &[offset as u64, 0x0]).unwrap();
+            }
+        }
+        T::default()
+    }
+
+    fn readStr<const len : usize>(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> String {
+        for i in 0..process.read::<u32>(self.numAddr).unwrap_or_default() {
+            let offset = i * 0x10;
+            let stringID = process.read::<u32>(self.arrAddr + offset + 0x8).unwrap_or_default();
+            if stringID < 100000 {
+                continue;
+            }
+            if stringsList.get(&(stringID - 100000)).unwrap_or(&String::from("")) == name {
+                let res = process.read_pointer_path::<ArrayCString<len>>(self.arrAddr, self.ps, &[offset as u64, 0x0]).unwrap_or_default();
+                return res.validate_utf8().unwrap_or_default().to_string();
+                //return process.read_pointer_path::<ArrayCString<len>>(self.arrAddr, self.ps, &[offset as u64, 0x0]).unwrap_or_default().validate_utf8().unwrap_or_default().to_string();
+            }
+        }
+        String::default()
+    }
+}
+
+fn get_first_instance(process : &Process, ps : PointerSize, obj : Address) -> Option<Address> {
+    let Ok(obj_prop) = process.read_pointer(obj.add(0x18),ps) else {
+        return None;
+    };
+    let instCount = process.read::<u32>(obj_prop.add(0x78)).unwrap_or_default();
+    if instCount == 0 { return None; }
+    let mut node = process.read_pointer(obj_prop.add(0x68),ps).unwrap_or_default();
+    process.read_pointer(node.add(0x10),ps).ok()
+}
+
+fn get_all_instances(process : &Process, ps : PointerSize, obj : Address) -> Vec<Address> {
+    let mut vec = Vec::<Address>::new();
+    let Ok(obj_prop) = process.read_pointer(obj.add(0x18),ps) else {
+        return vec;
+    };
+    let instCount = process.read::<u32>(obj_prop.add(0x78)).unwrap_or_default();
+    if instCount == 0 { return vec; }
+    let mut node = process.read_pointer(obj_prop.add(0x68),ps).unwrap_or_default();
+    for i in 0..instCount {
+        vec.push(process.read_pointer(node.add(0x10),ps).unwrap_or_default());
+        if i<instCount-1 { node = process.read_pointer(node,ps).unwrap_or_default(); }
+    }
+    vec
+}
+
+#[derive(PartialEq,Eq,Hash)]
+enum Textboxes {
+    Ch1GoToSleep,
+    Bagels,
+    FreezeRing,
+    ThornRing,
+    Thorny,
+    SusieFellAsleep,
+    Ch2TorielLast,
+    Ch4Egg,
+    //PrincessRBN,
+}
+
+fn update_text_open(process : &Process, ps : PointerSize, stringsList: &HashMap<u32, String>, writer : &Address, textWatchers : &mut HashMap<Textboxes,Watcher<bool>>, text : &HashMap<Textboxes,String>) {
+    let instVec = get_all_instances(process, ps, *writer);
+    timer::set_variable_int("number of obj_writer instances",instVec.len());
+    if instVec.len() == 0 { return; }
+    timer::set_variable("obj_writer address",format!("{:X}",instVec[0].value()).as_str());
+    let strVec = instVec.iter().map(|x| {
+        let finder = VarFinder::new(process,ps,*x);
+        let varPtr = finder.findVarPtr(process,stringsList,"mystring");
+        return process.read_pointer_path::<ArrayCString<128>>(varPtr,ps,&[0x0,0x0,0x0,0x0]).unwrap_or_default().validate_utf8().unwrap_or_default().to_string();
+    }).collect::<Vec<String>>();
+    timer::set_variable("last read string",strVec[0].as_str());
+    for (key,watcher) in textWatchers {
+        watcher.update_infallible(strVec.contains(&text[key]));
+    }
+}
 
 fn text_match(txt : ArrayCString<128>, en : &str, jp : &str) -> bool {
     txt.matches(en) || txt.matches(jp)
@@ -517,7 +663,7 @@ fn text_open_check_multipointer(txts : &Vec<&Pair<ArrayCString<128>>>, en : &str
             return true;
         }
     }
-    return false;
+    false
 }
 fn text_close_check_multipointer(txts : &Vec<&Pair<ArrayCString<128>>>, en : &str, jp : &str) -> bool {
     for txt in txts {
@@ -525,7 +671,7 @@ fn text_close_check_multipointer(txts : &Vec<&Pair<ArrayCString<128>>>, en : &st
             return true;
         }
     }
-    return false;
+    false
 }
 
 fn read_setting(key : &str) -> bool {
@@ -683,7 +829,7 @@ async fn main() {
                 });
 
                 let ps = match version {
-                    SP | D109 | D110 | D115 | D119 => ps32,
+                    SP | D109 | D110 | D115 => ps32,
                     _ => ps64
                 };
 
@@ -753,43 +899,67 @@ async fn main() {
                 let mut room_watch = Watcher::<i32>::new();
                 let mut room_name_watch = Watcher::<ArrayCString<64>>::new();
 
-                let mut string_literals = HashMap::<u32,String>::new();
-                let mut string_ids = HashMap::<String,u32>::new();
+                let mut stringsList = HashMap::<u32,String>::new();
                 {
                     let sListPtr = process.read_pointer(DELTARUNE.add(0x5FCD08),ps).unwrap();
                     let strNum = process.read::<u32>(sListPtr.add_signed(-0x18)).unwrap();
-                    asr::print_message(format!("Number of strings: {}",strNum).as_str());
+                    asr::print_message(format!("StringsList length: {}",strNum).as_str());
                     for i in 0..strNum {
                         //let entryAddr = process.read_pointer(sListPtr.add(8*i as u64), ps).unwrap();
                         let namePtr = process.read_pointer(sListPtr.add(8*i as u64), ps).unwrap();
                         let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();
                         let name = _name.validate_utf8().unwrap_or_default();
                         if name != "" {
-                            string_ids.insert(name.to_string(),i);
-                            string_literals.insert(i,name.to_string());
-                            if matches!(name,"plot"|"con"|"event") || i==7 {
-                                asr::print_message(format!("{} found at index {}",name,i).as_str());
+                            stringsList.insert(i, name.to_string());
+                            if name == "plot" {
+                                asr::print_limited::<64>(&format_args!("plot found at StringID {}",i))
                             }
                         }
                     }
                 }
+                asr::print_message(format!("Number of actual strings: {}",stringsList.len()).as_str());
                 //asr::print_message(format!("plot's String index is {}",string_ids["plot"]).as_str());
 
                 let mut obj_addr_map = HashMap::<String,Address>::new();
-                {
+                loop {
                     let objArrBase = process.read_pointer(DELTARUNE.add(0x6A7A98),ps).unwrap();
-                    let objNum = process.read::<u32>(objArrBase.add(0xC)).unwrap() as u64;
+                    let Ok(objNum) = process.read::<u32>(objArrBase.add(0xC)) else {
+                        continue;
+                    };
                     asr::print_message(format!("Number of objects: {}",objNum).as_str());
                     let arr = process.read_pointer(objArrBase,ps).unwrap();
                     for i in 0..objNum {
-                        let objAddr = process.read_pointer(arr.add(i*0x10),ps).unwrap();
-                        let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[0x18,0x0]).unwrap_or_default();
+                        let objAddr = process.read_pointer(arr.add(i as u64 * 0x10),ps).unwrap();
+                        let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[0x18,0x0,0x0]).unwrap_or_default();
                         let name = _name.validate_utf8().unwrap_or_default();
                         if name != "" {
+                            if name == "obj_writer" {
+                                asr::print_message(format!("obj_writer found at {}",objAddr).as_str());
+                            }
                             obj_addr_map.insert(name.to_string(),objAddr);
                         }
                     }
+                    break;
                 }
+                let mut objs = String::from("");
+                for k in obj_addr_map.keys() {
+                    objs += k.as_str();
+                    objs += ", ";
+                }
+                asr::print_message(&objs);
+
+
+
+                let globalOffset : u64 = match version {
+                    SP => 0x48E5DC,
+                    D109 | D110 => 0x6FCF38,
+                    D115 => 0x6FE860,
+                    D119 | Ch4_v102 => 0x6A1CA8,
+                    Ch5_v244 | Ch5_v247 => 0x6A9CA8,
+                };
+
+                let globalFinder = retry(|| VarFinder::try_new(&process,ps,DELTARUNE.add(globalOffset))).await;
+                asr::print_message("Found global");
 
                 // sound stuff (pointer only varies by runner version)
 
@@ -808,6 +978,21 @@ async fn main() {
                     D119 | Ch4_v102 => &[0x6A2F90, 0x0,  0x0,  0x0],
                     Ch5_v244 | Ch5_v247 => &[0x6AAF90, 0x0,  0x0,  0x0],
                 });
+
+                let text_en = HashMap::from([
+                    (Ch1GoToSleep,r"* (You decided to go to bed.)/%".to_string()),
+                    (Bagels,r"* (You were crushed under the&||weight of 400 bagels and&||defeated instantly...)/%".to_string()),
+                    (FreezeRing,r"* (You got the FreezeRing.)/%".to_string()),
+                    (ThornRing,r"\S1* (You got the ThornRing.)/%".to_string()),
+                    (Thorny,r"* (You have too many \cYWEAPONs\cW to&||take \cYPuppetScarf\c0.)/%".to_string()),
+                    (SusieFellAsleep,r"* (... Susie fell asleep.)/%".to_string()),
+                    (Ch2TorielLast,r"\E1* ... they're already&||asleep.../%".to_string()),
+                    (Ch4Egg,r"* (An Egg was picked up from a&||nearby easel.)/%".to_string())
+                ]);
+
+                let mut ch2_texts = HashMap::from([
+                    (Bagels,Watcher::<bool>::new())
+                ]);
 
 
                 //DEVICE_NAMER.EVENT
@@ -1227,6 +1412,26 @@ async fn main() {
                     //asr::timer::set_variable("Room Name Pointer Address",format!("{:X}",room_name_addr0.value()).as_str());
                     //asr::timer::set_variable("Room Name Address",format!("{:X}",room_name_addr.value()).as_str());
                     timer::set_variable("Room Name",cur_room);
+
+                    timer::set_variable_float("Plot (global read)",globalFinder.readVar::<f64>(&process,&stringsList,"plot"));
+
+                    timer::set_variable_float("Namer Event (dynamic)",match obj_addr_map.get("DEVICE_NAMER") {
+                        Some(obj) => {
+                            match get_first_instance(&process,ps,*obj) {
+                                Some(inst) => match VarFinder::try_new(&process,ps,inst) {
+                                    Some(finder) => finder.readVar::<f64>(&process,&stringsList,"event"),
+                                    None => 0.0
+                                }
+                                None => 0.0,
+                            }
+                        }
+                        None => 0.0,
+                    });
+
+                    update_text_open(&process,ps,&stringsList,obj_addr_map.get("obj_writer").unwrap(),&mut ch2_texts,&text_en);
+                    if ch2_texts[&Bagels].pair.is_some() {
+                        timer::set_variable("Bagels textbox open",ch2_texts[&Bagels].pair.unwrap().current.to_string().as_str());
+                    }
 
                     let state = timer::state();
 
