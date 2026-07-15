@@ -1,8 +1,15 @@
+#![allow(dead_code)]
 use std::collections::{HashMap, HashSet};
 
+use asr::deep_pointer::DeepPointer;
 use asr::settings::Map;
+use asr::watcher::{Pair, Watcher};
 use asr::{Address, PointerSize, Process, string::ArrayCString, timer};
-use crate::{Ver, Ver::{*}, settings::{*}, ps64};
+use crate::item_tracking::Item;
+use crate::{AC_Pauses, IL_Pauses, OST_LateCh2_Pauses, OST_Pauses};
+use crate::{EngineVersion::{self,*}, settings::{*}, ps64};
+
+
 
 pub struct VarFinder {
     pub numAddr : Address,
@@ -73,6 +80,7 @@ impl VarFinder {
                     } else {
                         pointerMap.entry(name).or_insert_with(|| process.read_pointer(self.arrAddr + offset, self.ps).unwrap_or_default());
                     }
+                    asr::print_message(format!("global.{} found at {}",name,pointerMap.get(name).unwrap_or(&Address::NULL)).as_str());
                 }
             }
             /*if names.contains(&name.as_str())  {
@@ -170,9 +178,9 @@ pub fn get_obj_var<T: bytemuck::Pod + Default>(process : &Process, ps : PointerS
     get_inst_var(&process,ps,stringsList,get_obj_inst(process,ps,objMap,_obj),name)
 }
 
-pub fn chapter1ify(version : &Ver, objName : &str) -> String {
+pub fn chapter1ify(version : &EngineVersion, objName : &str) -> String {
     match version {
-        D109 | D110 | D115 => objName.to_owned() + "_ch1",
+        LTS2022_1 | LTS2022_2 => objName.to_owned() + "_ch1",
         _ => objName.to_owned()
     }
 }
@@ -222,10 +230,11 @@ pub fn check_val_in_arr(process : &Process, ps : PointerSize, addr : Address, va
     false
 }
 
-pub fn start(auto_start : &AutoStart, splits : &mut HashSet<String>) {
+pub fn start(auto_start : &AutoStart, splits : &mut HashSet<String>, item_tracker : &mut HashSet<Item>) {
     match auto_start {
         AutoStart::AutoReset => {
             splits.clear();
+            item_tracker.clear();
             timer::reset();
             timer::start();
         }
@@ -238,5 +247,75 @@ pub fn start(auto_start : &AutoStart, splits : &mut HashSet<String>) {
             timer::start();
         }
         AutoStart::Off => ()
+    }
+}
+
+//also does some handling for IGT pausing and unpausing to simplify code elsewhere
+pub fn split(splits : &mut HashSet<String>, settings : &Settings, name : &str, already_checked : bool) {
+    if settings.ac_pause_timer {
+        if name == "resume_igt" {
+            timer::resume_game_time();
+            return;
+        }
+        //NOTE: Ch5 ending pauses are currently meant for TRACABARTPEEG and assume the category will follow the main rules regarding 5A end timing. After Ch6 releases, the AllChapters mode pause timing for Ch5 will presumably change to completion data
+        if match &settings.chapter_pause_timing {
+            PauseTiming::SingleChapter => IL_Pauses,
+            PauseTiming::AllChapters => AC_Pauses,
+            PauseTiming::OST => OST_Pauses,
+            PauseTiming::OSTLateCh2 => OST_LateCh2_Pauses
+        }.contains(&name) {
+            timer::pause_game_time();
+        }
+    }
+    if !already_checked && (name == "" || splits.contains(name) || !read_setting(name) ) {
+        return;
+    }
+    splits.insert(name.to_string());
+    asr::print_message(format!("Split triggered: {}",name).as_str());
+    timer::split();
+}
+
+pub struct GVarTrack<T: Clone + bytemuck::Pod> {
+    address : Address,
+    watcher : Watcher<T>,
+    name : &'static str,
+}
+impl<T: Clone + bytemuck::Pod> GVarTrack<T> {
+    pub fn new(ptrs : &HashMap<&'static str,Address>, name : &'static str) -> GVarTrack<T> {
+        GVarTrack {
+            watcher: Watcher::<T>::new(),
+            address: ptrs.get(&name).unwrap_or(&Address::NULL).clone(),
+            name
+        }
+    }
+    pub fn update_value(&mut self, process: &Process, ptrs : &HashMap<&'static str,Address>) -> &Pair<T> {
+        if self.address.is_null() {
+            self.address = *ptrs.get(self.name).unwrap_or(&Address::NULL);
+        }
+        let value = process.read::<T>(self.address).unwrap_or_else(|_e| T::zeroed());
+        self.watcher.update_infallible(value)
+    }
+}
+
+pub struct PathTrack<T: Clone + bytemuck::Pod> {
+    pointer : Option<DeepPointer<16>>,
+    watcher : Watcher<T>,
+}
+impl<T: Clone + bytemuck::Pod> PathTrack<T> {
+    pub fn new(module_base : Address, pointer_size: PointerSize, offsets : &[u64]) -> PathTrack<T> {
+        PathTrack {
+            watcher: Watcher::<T>::new(),
+            pointer: match offsets {
+                &[0] => None,
+                x => Some(DeepPointer::new(module_base, pointer_size, x)),
+            }
+        }
+    }
+    pub fn update_value(&mut self, process: &Process) -> &Pair<T> {
+        if self.pointer.is_none() {
+            return self.watcher.update_infallible(T::zeroed())
+        }
+        let value = self.pointer.unwrap().deref(&process).unwrap_or_else(|_e| T::zeroed());
+        self.watcher.update_infallible(value)
     }
 }

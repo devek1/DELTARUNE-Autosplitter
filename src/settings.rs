@@ -46,11 +46,15 @@ pub struct Settings {
     pub(crate) auto_start : AutoStart,
     ///Pause the timer between chapters
     #[default = true]
-    pub(crate) ac_pause_timer: bool,
+    pub(crate) ac_pause_timer : bool,
     ///Timing of the pauses
-    pub chapter_pause_timing : PauseTiming,
+    pub(crate) chapter_pause_timing : PauseTiming,
     ///Also unpause from loading a savefile
-    pub(crate) ac_unpause_loadsave: bool,
+    pub(crate) ac_unpause_loadsave : bool,
+    ///Item Tracker
+    pub(crate) item_tracking : bool,
+    ///Function with unrecognized data.win files (for brand-new patches, and mod speedruns)
+    pub(crate) allow_unsupported_version : bool,
 
 
     ///Chapter 1: The Beginning
@@ -426,10 +430,14 @@ pub struct Settings {
     ch5_fountain1 : bool,
     ///Seal Fountain 2
     ch5_fountain2 : bool,
+    ///Obtain Seed Packets
+    ch5_seed_packets : bool,
     ///Ending (SRC rules)
     ch5_ending_src : bool,
     ///Ending (completion data timing) [NOT IMPLEMENTED YET]
     ch5_ending_completion_data : bool,
+    ///Obtain Bread
+    ch5_bread : bool,
     ///Complete Side B
     ch5_sideb : bool,
 
