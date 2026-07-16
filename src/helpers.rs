@@ -9,48 +9,51 @@ use crate::item_tracking::Item;
 use crate::{AC_Pauses, IL_Pauses, OST_LateCh2_Pauses, OST_Pauses};
 use crate::{EngineVersion::{self,*}, settings::{*}, ps64};
 
-
+pub async fn delay_split_frames(name : &str, frames : u32) -> &str {
+    for _ in 0..(2*frames) {
+        asr::future::next_tick().await;
+    }
+    name
+}
 
 pub struct VarFinder {
     pub numAddr : Address,
     pub arrAddr : Address,
-    ps : PointerSize
+    ps : PointerSize,
+    jmp : usize
 }
 
 impl VarFinder {
-    pub fn try_new(process: &Process, ps: PointerSize, instAddr: Address) -> Option<VarFinder> {
-        let Ok(midAddr) = process.read_pointer(instAddr.add(match ps { ps64 => 0x48, _ => 0x24}), ps) else {
-            return None;
-        };
-        Some(VarFinder {
+    pub fn try_new(process: &Process, ps: PointerSize, instAddr: Address) -> Result<VarFinder,asr::Error> {
+        let midAddr = process.read_pointer(instAddr.add(match ps { ps64 => 0x48, _ => 0x24}), ps)?;
+        Ok(VarFinder {
             numAddr: midAddr.add(0x8),
-            arrAddr: process.read_pointer(midAddr.add(0x10), ps).unwrap(),
-            ps
+            arrAddr: process.read_pointer(midAddr.add(0x10), ps)?,
+            ps,
+            jmp: match ps {ps64=>0x10,_=>0xC}
         })
     }
-    pub fn try_new_alt32(process: &Process, ps: PointerSize, globalAddr: Address) -> Option<VarFinder> {
-        let Ok(arrAddr) = process.read_pointer(globalAddr.add(0x30), ps) else {
-            return None;
-        };
-        Some(VarFinder {
+    pub fn try_new_alt32(process: &Process, ps: PointerSize, globalAddr: Address) -> Result<VarFinder,asr::Error> {
+        let arrAddr = process.read_pointer(globalAddr.add(0x30), ps)?;
+        Ok(VarFinder {
             numAddr: globalAddr.add(0x28),
             arrAddr: arrAddr,
-            ps
+            ps,
+            jmp: match ps {ps64=>0x10,_=>0xC}
         })
     }
-    pub fn new(process: &Process, ps: PointerSize, instAddr: Address) -> VarFinder {
+    /*pub fn new(process: &Process, ps: PointerSize, instAddr: Address) -> VarFinder {
         let midAddr = process.read_pointer(instAddr.add(match ps { ps64 => 0x48, _ => 0x24}), ps).unwrap();
         VarFinder {
             numAddr: midAddr.add(0x8),
             arrAddr: process.read_pointer(midAddr.add(0x10), ps).unwrap(),
             ps
         }
-    }
+    }*/
 
     //Find a pointer to a specific variable, this can be used to find initial pointers for variables of complex types
     pub fn findVarPtr(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> Address {
-        for i in 0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64) {
-            let offset = match self.ps {ps64=>0x10,_=>0xC} * i;
+        for offset in (0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64)*self.jmp as u64).step_by(self.jmp) {
             let stringID = process.read::<u32>(self.arrAddr + offset + match self.ps {ps64=>0x8,_=>0x4}).unwrap_or_default();
             if stringID < 100000 {
                 continue;
@@ -64,8 +67,7 @@ impl VarFinder {
 
     //Populate a HashMap with pointers for variables from provided list
     pub fn populatePtrMap(&self, process: &Process, stringsList: &HashMap<u32, String>, pointerMap : &mut HashMap<&'static str, Address>, names: &[&'static str]) {
-        for i in 0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64) {
-            let offset = match self.ps {ps64=>0x10,_=>0xC} * i;
+        for offset in (0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64)*self.jmp as u64).step_by(self.jmp) {
             let stringID = process.read::<u32>(self.arrAddr + offset + match self.ps {ps64=>0x8,_=>0x4}).unwrap_or_default();
             if stringID < 100000 {
                 continue;
@@ -76,10 +78,11 @@ impl VarFinder {
             for name in names {
                 if string.as_str() == name.trim_end_matches("[0]") {
                     if name.ends_with("[0]") {
-                        match self.ps { 
+                        match self.ps { //there's no direct support for reading a pointer from a pointer path, so we need to specifically read different types (64-bit address vs 32-bit address) depending on 64-bit vs 32-bit
                             ps64 => { pointerMap.entry(name).or_insert_with(|| Address::from(process.read_pointer_path::<u64>(self.arrAddr, self.ps,&[offset,0x0,0x90]).unwrap_or_default())); }
-                            _ => { pointerMap.entry(name).or_insert_with(|| Address::from(process.read_pointer_path::<u64>(self.arrAddr, self.ps,&[offset,0x64]).unwrap_or_default())); }
-                        };
+                            _ => { pointerMap.entry(name).or_insert_with(|| Address::from(process.read_pointer_path::<u32>(self.arrAddr, self.ps,&[offset,0x0,0x64]).unwrap_or_default())); }
+                        }
+                        
                     } else {
                         pointerMap.entry(name).or_insert_with(|| process.read_pointer(self.arrAddr + offset, self.ps).unwrap_or_default());
                     }
@@ -95,15 +98,14 @@ impl VarFinder {
     //Immediately read simple value from a variable, this is used to read numeric variable values from instances of objects without needing
     //not strictly limited to numbers, but most other types require further pointers
     pub fn readNum<T: bytemuck::Pod + Default>(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> T {
-        for i in 0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64) {
-            let offset = match self.ps {ps64=>0x10,_=>0xC} * i;
+        for offset in (0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64)*self.jmp as u64).step_by(self.jmp) {
             let stringID = process.read::<u32>(self.arrAddr + offset + match self.ps {ps64=>0x8,_=>0x4}).unwrap_or_default();
             if stringID < 100000 {
                 continue;
             }
             if stringsList.get(&(stringID - 100000)).unwrap_or(&String::from("")) == name {
                 //timer::set_variable("Address read from",process.read_pointer(self.arrAddr.add(offset as u64),self.ps).unwrap_or_default().);
-                return process.read_pointer_path::<T>(self.arrAddr, self.ps, &[offset,0x0]).unwrap();
+                return process.read_pointer_path::<T>(self.arrAddr, self.ps, &[offset,0x0]).unwrap_or_default();
             }
         }
         T::default()
@@ -111,8 +113,7 @@ impl VarFinder {
 
     //Strings take additional layers of pointers
     pub fn readStr<const len : usize>(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> ArrayCString<len> {
-        for i in 0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64) {
-            let offset = match self.ps {ps64=>0x10,_=>0xC} * i;
+        for offset in (0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64)*self.jmp as u64).step_by(self.jmp) {
             let stringID = process.read::<u32>(self.arrAddr + offset + match self.ps {ps64=>0x8,_=>0x4}).unwrap_or_default();
             if stringID < 100000 {
                 continue;
@@ -161,8 +162,8 @@ pub fn get_inst_var<T: bytemuck::Pod + Default>(process : &Process, ps : Pointer
     match inst {
         Address::NULL => T::default(),
         inst => match VarFinder::try_new(&process,ps,inst) {
-            Some(finder) => finder.readNum::<T>(&process, stringsList, name),
-            None => T::default()
+            Ok(finder) => finder.readNum::<T>(&process, stringsList, name),
+            Err(_) => T::default()
         }
     }
 }
@@ -183,7 +184,7 @@ pub fn get_obj_var<T: bytemuck::Pod + Default>(process : &Process, ps : PointerS
 
 pub fn chapter1ify(version : &EngineVersion, objName : &str) -> String {
     match version {
-        LTS2022_1 | LTS2022_2 => objName.to_owned() + "_ch1",
+        GMS2_2022_1 | GMS2_2022_2 => objName.to_owned() + "_ch1",
         _ => objName.to_owned()
     }
 }
@@ -192,7 +193,8 @@ pub fn check_text(process : &Process, ps : PointerSize, stringsList: &HashMap<u3
     let instVec = get_all_instances(process, ps, writer);
     if instVec.len() == 0 { return false; }
     for instance in instVec {
-        let txt = VarFinder::new(&process,ps,instance).readStr::<128>(&process,&stringsList,"mystring");
+        let Ok(finder) = VarFinder::try_new(&process,ps,instance) else { continue; };
+        let txt = finder.readStr::<128>(&process,&stringsList,"mystring");
         if txt.matches(en) || txt.matches(jp) {
             return true;
         }
@@ -220,7 +222,7 @@ pub fn read_setting(key : &str) -> bool {
     }
 }
 
-pub const fn arr_index(i : u64) -> u64 { i * 0x10 }
+pub const fn arr_pos(i : u64) -> u64 { i * 0x10 }
 
 pub fn check_val_in_arr(process : &Process, ps : PointerSize, addr : Address, val : f64, start_index : u64, end_index : u64) -> bool {
     let jmp = match ps { ps64 => 0x8, _ => 0x4};
@@ -318,7 +320,7 @@ impl<T: Clone + bytemuck::Pod> PathTrack<T> {
         if self.pointer.is_none() {
             return self.watcher.update_infallible(T::zeroed())
         }
-        let value = self.pointer.unwrap().deref(&process).unwrap_or_else(|_e| T::zeroed());
+        let value = self.pointer.unwrap_or_default().deref(&process).unwrap_or_else(|_e| T::zeroed());
         self.watcher.update_infallible(value)
     }
 }

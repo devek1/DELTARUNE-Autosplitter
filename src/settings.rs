@@ -434,11 +434,11 @@ pub struct Settings {
     ch5_seed_packets : bool,
     ///Ending (SRC rules)
     ch5_ending_src : bool,
-    ///Ending (completion data timing) [NOT IMPLEMENTED YET]
+    ///Ending (completion data timing) [NOTE: no category uses this yet]
     ch5_ending_completion_data : bool,
     ///Obtain Bread
     ch5_bread : bool,
-    ///Complete Side B
+    ///Complete Side B - speedrun timing
     ch5_sideb : bool,
 
     ///All Bosses Splits

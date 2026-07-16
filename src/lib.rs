@@ -2,8 +2,8 @@
 
 use std::{fs::read};
 use asr::{
-    future::next_tick, PointerSize, Process,
-    watcher::{Watcher,Pair}, Address, string::ArrayCString, signature::Signature, timer, timer::TimerState, time_util::Instant,
+    future::{next_tick,sleep}, PointerSize, Process,
+    watcher::{Watcher,Pair}, Address, string::ArrayCString, signature::Signature, timer, timer::TimerState, time_util::{Instant},
     settings::Gui, file_format::pe
 };
 use std::collections::{HashMap, HashSet};
@@ -32,12 +32,15 @@ enum GameVersion {
     Ch5_v247 //currently latest version
 }
 
+//NOTE: LTS 2022.0 branched from Monthly 2022.9, so LTS 2022.0.__ is strictly newer than Monthly 2022.2
+//exact version numbers for LTS versions taken from OpenGM's GitHub page. However the version number for SP is taken from UTMT, and OpenGM claims that it's 2.2.0.258 instead
+//Also, GameMaker used the "GameMaker Studio 2" branding up to and including version 2022.2, with 2022.3 changing the name of the engine back to simply "GameMaker"
 enum EngineVersion {
-    S2_0_6, //SURVEY_PROGRAM
-    LTS2022_1, //Demo 1.09 and 1.10
-    LTS2022_2, //Demo 1.15
-    LTS2022_3_v1, //first version with change_game. Demo 1.19 and Ch1-4 v1.02
-    LTS2022_3_v2, //Ch1-5 v244 and v247
+    GMS2_2_0_6, //SURVEY_PROGRAM
+    GMS2_2022_1, //Demo 1.09 and 1.10
+    GMS2_2022_2, //Demo 1.15
+    GM_LTS2022_0_3_99, //Demo 1.19 and Ch1-4 v1.02 (first version with change_game to be used by a public DELTARUNE release)
+    GM_LTS2022_0_3_104, //Ch1-5 v244 and v247
 }
 
 
@@ -86,11 +89,11 @@ async fn main() {
                 let runner_md5 = &format!("{:X}", md5::compute(read(&path).unwrap_or_default()));
                 timer::set_variable("Runner MD5", runner_md5);
                 let version = match runner_md5.to_lowercase().as_str() {
-                    "4d09627e1fa123d12ddf1a496c489f73" => S2_0_6,
-                    "dcfb86f7a80d9906bbbafa1b2c224848" => LTS2022_1,
-                    "a9db8b7fb6333b5e267f574f46076b3f" => LTS2022_2,
-                    "14af94e0435eb4cbe3bb5a03ab4218c4" => LTS2022_3_v1,
-                    "7bf3cccc2e54481ced3a149e1a083684" => LTS2022_3_v2,
+                    "4d09627e1fa123d12ddf1a496c489f73" => GMS2_2_0_6,
+                    "dcfb86f7a80d9906bbbafa1b2c224848" => GMS2_2022_1,
+                    "a9db8b7fb6333b5e267f574f46076b3f" => GMS2_2022_2,
+                    "14af94e0435eb4cbe3bb5a03ab4218c4" => GM_LTS2022_0_3_99,
+                    "7bf3cccc2e54481ced3a149e1a083684" => GM_LTS2022_0_3_104,
                     _ => {
                         timer::set_variable("version","Invalid");
                         asr::print_message("Unrecognized GameMaker runner, autosplitter cannot function with this");
@@ -98,11 +101,11 @@ async fn main() {
                     },
                 };
                 timer::set_variable("Engine Version", match version {
-                    S2_0_6 => "GameMaker Studio 2.0.6 (32-bit)",
-                    LTS2022_1 => "GameMaker 2022.0.1 LTS (32-bit)",
-                    LTS2022_2 => "GameMaker 2022.0.2 LTS (32-bit)",
-                    LTS2022_3_v1 => "GameMaker 2022.0.3.?? LTS (64-bit, PS5 fps glitched)",
-                    LTS2022_3_v2 => "GameMaker 2022.0.3.?? LTS (64-bit, PS5 fps fixed)",
+                    GMS2_2_0_6 => "GMS2 v2.0.6 (32-bit)",
+                    GMS2_2022_1 => "GMS2 Monthly 2022.1.0.482 (32-bit)",
+                    GMS2_2022_2 => "GMS2 Monthly 2022.2 (32-bit)",
+                    GM_LTS2022_0_3_99 => "GameMaker LTS 2022.0.3.99 (64-bit)",
+                    GM_LTS2022_0_3_104 => "GameMaker LTS 2022.0.3.104 (64-bit)",
                 });
 
 
@@ -156,7 +159,7 @@ async fn main() {
                 }
 
                 let ps = match version {
-                    S2_0_6 | LTS2022_1 | LTS2022_2 => ps32,
+                    GMS2_2_0_6 | GMS2_2022_1 | GMS2_2022_2 => ps32,
                     _ => ps64
                 };
 
@@ -178,16 +181,16 @@ async fn main() {
                     _ => unreachable!()
                 };*/
 
-                let mut chapter = 0;
+                let mut chapter = -1;
 
                 if ps == ps64
                 { //working_directory only changes with change_game which starts a whole new process for the autosplitter to attach to, so we only need to read it once per process attached
                     let mut _dir : ArrayCString<256>;
                     loop {
                         _dir = process.read_pointer_path::<ArrayCString<256>>(DELTARUNE, ps, match version {
-                            S2_0_6 | LTS2022_1 | LTS2022_2 => unreachable!(), //we shouldn't be at this part of the code with those versions
-                            LTS2022_3_v1 => &[0x8B2818,0],
-                            LTS2022_3_v2 => &[0x8BA818,0],
+                            GMS2_2_0_6 | GMS2_2022_1 | GMS2_2022_2 => unreachable!(), //we shouldn't be at this part of the code with those versions
+                            GM_LTS2022_0_3_99 => &[0x8B2818,0],
+                            GM_LTS2022_0_3_104 => &[0x8BA818,0],
                         }).unwrap_or_default();
                         if _dir != ArrayCString::<256>::default() {
                             break;
@@ -245,18 +248,18 @@ async fn main() {
 
                 //temporary unreachables for pointers I haven't found yet
                 let stringsListOffset = match version {
-                    S2_0_6 => 0x3EAE58,
-                    LTS2022_1 => 0x43EA88,
-                    LTS2022_2 => 0x440AA8,
-                    LTS2022_3_v1 => 0x5F4CF8,
-                    LTS2022_3_v2 => 0x5FCD08,
+                    GMS2_2_0_6 => 0x3EAE58,
+                    GMS2_2022_1 => 0x43EA88,
+                    GMS2_2022_2 => 0x440AA8,
+                    GM_LTS2022_0_3_99 => 0x5F4CF8,
+                    GM_LTS2022_0_3_104 => 0x5FCD08,
                 };
 
                 //let stringsListTiming = Instant::now();
                 let mut stringsList = HashMap::<u32,String>::new();
                 {
-                    let sListPtr = process.read_pointer(DELTARUNE.add(stringsListOffset),ps).unwrap();
-                    //let strNum = process.read::<u32>(sListPtr.add_signed(strNumOffset)).unwrap(); //there doesn't seem to be a real length value anywhere around here
+                    let Ok(sListPtr) = process.read_pointer(DELTARUNE.add(stringsListOffset),ps) else { loop { next_tick().await; } };
+                    //let strNum = process.read::<u32>(sListPtr.add_signed(strNumOffset)).unwrap_or_default(); //there doesn't seem to be a real length value anywhere around here
                     //asr::print_message(format!("StringsList length: {}",strNum).as_str());
                     for i in 0..32768 {
                         let Ok(namePtr) = process.read_pointer(sListPtr.add(psBytes*i as u64), ps) else {
@@ -271,10 +274,10 @@ async fn main() {
                         if name != "" {
                             stringsList.insert(i, name.to_string());
 
-                            /*if matches!(name,"plot"|"mystring") {
+                            if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
                                 asr::print_limited::<64>(&format_args!("{} found at StringID {}",name,i))
                             }
-                            timer::set_variable_int("last real string index",i);*/
+                            timer::set_variable_int("last real string index",i);
                         }
                     }
                 }
@@ -284,11 +287,11 @@ async fn main() {
 
                 //temporary unreachables for pointers I haven't found yet
                 let objArrOffset = match version {
-                    S2_0_6 => todo!(),
-                    LTS2022_1 => 0x4DCCEC,
-                    LTS2022_2 => 0x4DE60C,
-                    LTS2022_3_v1 => 0x69FA98,
-                    LTS2022_3_v2 => 0x6A7A98,
+                    GMS2_2_0_6 => 0x0, //temp
+                    GMS2_2022_1 => 0x4DCCEC,
+                    GMS2_2022_2 => 0x4DE60C,
+                    GM_LTS2022_0_3_99 => 0x69FA98,
+                    GM_LTS2022_0_3_104 => 0x6A7A98,
                 };
 
                 let objPropOff = match ps {
@@ -304,20 +307,20 @@ async fn main() {
                 };
 
                 let mut obj_addr_map = HashMap::<String,Address>::new();
-                loop {
+                'objRetrying: loop {
                     //for testing we temporarily skip object reading in versions that don't have offsets found yet
-                    if matches!(version,S2_0_6) {
+                    if matches!(version,GMS2_2_0_6) {
                         break;
                     }
-                    let objArrBase = process.read_pointer(DELTARUNE.add(objArrOffset),ps).unwrap();
+                    let Ok(objArrBase) = process.read_pointer(DELTARUNE.add(objArrOffset),ps) else { continue; };
                     let Ok(objNum) = process.read::<u32>(objArrBase.add(objNumOff)) else {
                         continue;
                     };
                     if objNum == 0 { continue; }
                     asr::print_message(format!("Number of objects: {}",objNum).as_str());
-                    let arr = process.read_pointer(objArrBase,ps).unwrap();
+                    let Ok(arr) = process.read_pointer(objArrBase,ps) else { continue; };
                     for i in 0..1024u64 {
-                        let mut objAddr = process.read_pointer(arr.add(psBytes*i),ps).unwrap();
+                        let Ok(mut objAddr) = process.read_pointer(arr.add(psBytes as u64*i),ps) else { continue 'objRetrying; };
                         for _layer in 1..=10 {
                             if objAddr.is_null() { break; }
                             let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[objPropOff,0x0,0x0]).unwrap_or_default();
@@ -354,16 +357,16 @@ async fn main() {
 
                 
                 let globalOffset : u64 = match version {
-                    S2_0_6 => 0x48E5DC,
-                    LTS2022_1 => 0x6FCF38,
-                    LTS2022_2 => 0x6FE860,
-                    LTS2022_3_v1 => 0x6A1CA8,
-                    LTS2022_3_v2 => 0x6A9CA8,
+                    GMS2_2_0_6 => 0x48E5DC,
+                    GMS2_2022_1 => 0x6FCF38,
+                    GMS2_2022_2 => 0x6FE860,
+                    GM_LTS2022_0_3_99 => 0x6A1CA8,
+                    GM_LTS2022_0_3_104 => 0x6A9CA8,
                 };
 
                 let globalFinder = loop {
                     let Ok(globalAddr) = process.read_pointer(DELTARUNE.add(globalOffset),ps) else { continue; };
-                    if let Some(_finder) = match ps{
+                    if let Ok(_finder) = match ps {
                         ps64 => VarFinder::try_new(&process,ps,globalAddr),
                         _ => VarFinder::try_new_alt32(&process,ps,globalAddr)
                     } {
@@ -408,19 +411,19 @@ async fn main() {
                 // sound stuff (pointer only varies by runner version)
 
                 let mut snd_ptr = PathTrack::<ArrayCString<256>>::new(DELTARUNE, ps, match version {
-                    S2_0_6 => n,
-                    LTS2022_1 => &[0x4E0794, 0x58, 0xC0,  0x40, 0x0],
-                    LTS2022_2 => &[0x4E20B4, 0x58, 0xC0,  0x40, 0x0],
-                    LTS2022_3_v1 => &[0x6A3818, 0x60, 0xD0, 0x58, 0x0],
-                    LTS2022_3_v2 => &[0x6AB818, 0x60, 0xD0, 0x58, 0x0],
+                    GMS2_2_0_6 => n,
+                    GMS2_2022_1 => &[0x4E0794, 0x58, 0xC0,  0x40, 0x0],
+                    GMS2_2022_2 => &[0x4E20B4, 0x58, 0xC0,  0x40, 0x0],
+                    GM_LTS2022_0_3_99 => &[0x6A3818, 0x60, 0xD0, 0x58, 0x0],
+                    GM_LTS2022_0_3_104 => &[0x6AB818, 0x60, 0xD0, 0x58, 0x0],
                 });
 
                 let mut mus_ptr = PathTrack::<ArrayCString<256>>::new(DELTARUNE, ps, match version {
-                    S2_0_6 => n,
-                    LTS2022_1 => &[0x4DFF58, 0x0,  0x44,  0x0],
-                    LTS2022_2 => &[0x4E1878, 0x0,  0x0,   0x0],
-                    LTS2022_3_v1 => &[0x6A2F90, 0x0,  0x0,  0x0],
-                    LTS2022_3_v2 => &[0x6AAF90, 0x0,  0x0,  0x0],
+                    GMS2_2_0_6 => n,
+                    GMS2_2022_1 => &[0x4DFF58, 0x0,  0x44,  0x0],
+                    GMS2_2022_2 => &[0x4E1878, 0x0,  0x0,   0x0],
+                    GM_LTS2022_0_3_99 => &[0x6A2F90, 0x0,  0x0,  0x0],
+                    GM_LTS2022_0_3_104 => &[0x6AAF90, 0x0,  0x0,  0x0],
                 });
 
                 //let mut tempVar = 0;
@@ -429,9 +432,9 @@ async fn main() {
 
                 let mut globalPtrAttempts = 0;
 
-                const items_goal : usize = 160;
+                //const items_goal : usize = 160;
 
-                let item_map = HashMap::from(item_map_init_array);
+                let item_map = HashMap::from(item_map_init_array());
 
                 let mut item_tracker = HashSet::<Item>::new();
 
@@ -448,9 +451,10 @@ async fn main() {
 
                     //if some global pointers weren't found yet, look for them again. Exception for some that are expected to be missing under specific circumstances
                     if globalPtrs.keys().len() < match version {
-                        S2_0_6 => GLOBALS.len() - 1, //SP doesn't have Storage mechanic
+                        GMS2_2_0_6 => GLOBALS.len() - 1, //SP doesn't have Storage mechanic
                         //LTS2022_1 | LTS2022_2 => GLOBALS.len()-1, //pre-change_game demo versions should have all the globals we currently use
                         _ => match chapter {
+                            -1 => GLOBALS.len()-1, //in pre-change_game Chapter Select we can't directly read the chapter
                             0 => 0, //no relevant globals in Chapter Select
                             1 => GLOBALS.len() - 1, //Chapter 1 doesn't have Storage mechanic
                             _ => GLOBALS.len() //Chapter 2 and later should have all globals we currently use
@@ -466,7 +470,11 @@ async fn main() {
                         flag0Ptr = get_array_element0(&process,ps,&global_ptr(&process,&stringsList,&globalFinder,&mut globalPtrs,"flag"));
                     }*/
 
-                    if matches!(version,LTS2022_1|LTS2022_2) {
+                    if matches!(version,GMS2_2022_1|GMS2_2022_2) {
+                        if !globalPtrs.contains_key("chapter") {
+                            next_tick().await;
+                            continue;
+                        }
                         chapter = _chapter.update_value(&process,&globalPtrs).current as i32;
                     }
                     timer::set_variable_int("Chapter",chapter);
@@ -566,7 +574,7 @@ async fn main() {
                             /*match darkzone.current {
                                 1.0 => {
                                     for i in 0..12 as u64 {
-                                        let offset = i * 0x10; //NOTE: if we want to have 32-bit item tracking support this multiplier will probably be different!
+                                        let offset = i * 0x10;
                                         item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemType::Item,global_ptr(&globalPtrs,"item[0]").add(offset));
                                         item_check_slot(&process,&mut item_tracker,&item_map,chapter,KeyItem,global_ptr(&globalPtrs,"keyitem[0]").add(offset));
                                         item_check_slot(&process,&mut item_tracker,&item_map,chapter,Weapon,global_ptr(&globalPtrs,"weapon[0]").add(offset));
@@ -588,15 +596,14 @@ async fn main() {
                                 }
                                 0.0 => {
                                     for i in 0..12 as u64 {
-                                            let offset = i * 0x10; //NOTE: if we want to have 32-bit item tracking support this multiplier will probably be different!
+                                            let offset = i * 0x10;
                                             item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemLW,global_ptr(&globalPtrs,"litem[0]").add(offset));
                                     }
                                 }
                                 _ => () //should always be 1 or 0
                             }*/
-                            for i in 0..12 as u64 {
-                                let offset = i * 0x10; //NOTE: if we want to have 32-bit item tracking support this multiplier will probably be different!
-                                if i < 8 {
+                            for offset in (0..arr_pos(12)).step_by(0x10) {
+                                if offset < arr_pos(8) {
                                     item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemLW,global_ptr(&globalPtrs,"litem[0]").add(offset));
                                 }
                                 item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemType::Item,global_ptr(&globalPtrs,"item[0]").add(offset));
@@ -608,11 +615,10 @@ async fn main() {
                                 }
                             }
                             if chapter > 1 {
-                                for i in 12..48 as u64 {
-                                    let offset = i * 0x10;
+                                for offset in (arr_pos(12)..arr_pos(48)).step_by(0x10) {
                                     item_check_slot(&process,&mut item_tracker,&item_map,chapter,Weapon,global_ptr(&globalPtrs,"weapon[0]").add(offset));
                                     item_check_slot(&process,&mut item_tracker,&item_map,chapter,Armor,global_ptr(&globalPtrs,"armor[0]").add(offset));
-                                    if i < match chapter { 2|3 => 24, 4 => 36, 5 => 48, _ => unreachable!()} {
+                                    if offset < match chapter { 2|3 => arr_pos(24), 4 => arr_pos(36), 5 => arr_pos(48), _ => unreachable!()} {
                                         item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemType::Item,global_ptr(&globalPtrs,"pocketitem[0]").add(offset));
                                     }
                                 }
@@ -779,8 +785,7 @@ async fn main() {
                                     },false)
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
-                                          "room_dw_cyber_queen_boxing" if msc.current == 1015.0 && mus.bytes_changed() && mus.current.validate_utf8().unwrap_or_default().ends_with(r"mus\cyber.ogg")
-                                          => "ch2_arcade_text",
+                                          "room_dw_cyber_queen_boxing" if plot.bytes_changed_to(&55.0) => delay_split_frames("ch2_arcade_text", 1).await,
                                           "room_dw_cyber_music_final" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch2_dj_battle",
                                           "room_dw_city_big_2" if text_check.changed_to(&true) => "ch2_freeze_ring",
                                           "room_dw_city_moss" if text_check.changed_to(&false) => "ch2_thorn_ring",
@@ -797,8 +802,8 @@ async fn main() {
                             3 => {
 
                                 let flag = _flag.update_infallible(match cur_room {
-                                    "room_dw_ch3_man" => process.read::<f64>(global_ptr(&globalPtrs,"flag[0]").add(arr_index(930))).unwrap_or_default(),
-                                    "room_dw_city_berdly_ch2" => process.read::<f64>(global_ptr(&globalPtrs,"flag[0]").add(arr_index(1047))).unwrap_or_default(),
+                                    "room_dw_ch3_man" => process.read::<f64>(global_ptr(&globalPtrs,"flag[0]").add(arr_pos(930))).unwrap_or_default(),
+                                    "room_dw_city_berdly_ch2" => process.read::<f64>(global_ptr(&globalPtrs,"flag[0]").add(arr_pos(1047))).unwrap_or_default(),
                                     _ => 0.0
                                 });
                                 timer::set_variable_float("Flag",flag.current);
@@ -965,7 +970,7 @@ async fn main() {
                                         ("room_dw_fcastle_flowerydash","room_dw_post_flowery_battle") => "ch5_omega_flowery",
                                         ("room_dw_fcastle_top_fountain","room_dw_post_fountain_close") => "ch5_fountain1",
                                         ("room_cc_fountain","room_flowershop_2f") => "ch5_fountain2",
-                                        (_,"room_schooldoor") if process.read::<f64>(global_ptr(&globalPtrs, "flag[0]").add(arr_index(1324))).unwrap_or_default() == 3.0
+                                        (_,"room_schooldoor") if process.read::<f64>(global_ptr(&globalPtrs, "flag[0]").add(arr_pos(1324))).unwrap_or_default() == 3.0
                                         => "ch5_ending_completion_data",
                                         ("room_schooldoor","room_ed") => "ch5_ending_src",
                                         _ => ""
