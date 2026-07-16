@@ -49,7 +49,7 @@ const ps32: PointerSize = PointerSize::Bit32;
 
 //don't try to directly get any array index other than [0], the [0] suffix is hardcoded to find the first item in an array, and we just add to the address at memory read time to read specific indices
 //to read a specific entry in an array, in Chapter 3 or later, you can use the compile-time function arr_index on the index. In Chapters 1-2 you have to multiply the index by 8 on 64-bit versions and 4 on 32-bit versions
-const GLOBALS : [&str;13] = ["choice","plot","chapter","fighting","msc","darkzone",
+const GLOBALS : [&str;14] = ["choice","plot","chapter","fighting","msc","darkzone", "item",
                             "flag[0]","keyitem[0]","item[0]","pocketitem[0]","weapon[0]","armor[0]","litem[0]"];
 
 const IL_Pauses : [&str;5] = ["ch1_ending","ch2_ending_il","ch3_ending","ch4_ending_il","ch5_ending_src"];
@@ -97,6 +97,13 @@ async fn main() {
                         loop {next_tick().await;}
                     },
                 };
+                timer::set_variable("Engine Version", match version {
+                    S2_0_6 => "GameMaker Studio 2.0.6 (32-bit)",
+                    LTS2022_1 => "GameMaker 2022.0.1 LTS (32-bit)",
+                    LTS2022_2 => "GameMaker 2022.0.2 LTS (32-bit)",
+                    LTS2022_3_v1 => "GameMaker 2022.0.3.?? LTS (64-bit, PS5 fps glitched)",
+                    LTS2022_3_v2 => "GameMaker 2022.0.3.?? LTS (64-bit, PS5 fps fixed)",
+                });
 
 
                 path = path.replace("DELTARUNE.exe", "data.win");
@@ -133,7 +140,7 @@ async fn main() {
                     "21CDD09EEADBCC77535AB2BB3412259A" => Ch5_v247, //v247 OST tracker
                     _ => Invalid,
                 };
-                timer::set_variable("version", match game_version {
+                timer::set_variable("Game Version", match game_version {
                     Invalid => "Invalid",
                     SP => "SURVEY_PROGRAM",
                     D109 => "Demo v1.09",
@@ -277,11 +284,23 @@ async fn main() {
 
                 //temporary unreachables for pointers I haven't found yet
                 let objArrOffset = match version {
-                    S2_0_6 => unreachable!(),
+                    S2_0_6 => todo!(),
                     LTS2022_1 => 0x4DCCEC,
-                    LTS2022_2 => 0xDE60C,
+                    LTS2022_2 => 0x4DE60C,
                     LTS2022_3_v1 => 0x69FA98,
                     LTS2022_3_v2 => 0x6A7A98,
+                };
+
+                let objPropOff = match ps {
+                    ps64 => 0x18,
+                    ps32 => 0xC,
+                    _ => unreachable!()
+                };
+
+                let objNumOff = match ps {
+                    ps64 => 0xC,
+                    ps32 => 0x8,
+                    _ => unreachable!()
                 };
 
                 let mut obj_addr_map = HashMap::<String,Address>::new();
@@ -291,7 +310,7 @@ async fn main() {
                         break;
                     }
                     let objArrBase = process.read_pointer(DELTARUNE.add(objArrOffset),ps).unwrap();
-                    let Ok(objNum) = process.read::<u32>(objArrBase.add(0xC)) else {
+                    let Ok(objNum) = process.read::<u32>(objArrBase.add(objNumOff)) else {
                         continue;
                     };
                     if objNum == 0 { continue; }
@@ -301,7 +320,7 @@ async fn main() {
                         let mut objAddr = process.read_pointer(arr.add(psBytes*i),ps).unwrap();
                         for _layer in 1..=10 {
                             if objAddr.is_null() { break; }
-                            let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[0x18,0x0,0x0]).unwrap_or_default();
+                            let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[objPropOff,0x0,0x0]).unwrap_or_default();
                             let name = _name.validate_utf8().unwrap_or_default();
                             if name != "" {
                                 /*if matches!(name,"obj_writer"|"obj_moneydisplay"|"DEVICE_NAMER"|"obj_berdly_smoke") {
@@ -430,7 +449,7 @@ async fn main() {
                     //if some global pointers weren't found yet, look for them again. Exception for some that are expected to be missing under specific circumstances
                     if globalPtrs.keys().len() < match version {
                         S2_0_6 => GLOBALS.len() - 1, //SP doesn't have Storage mechanic
-                        LTS2022_1 | LTS2022_2 => GLOBALS.len(), //pre-change_game demo versions should have all the globals we currently use
+                        //LTS2022_1 | LTS2022_2 => GLOBALS.len()-1, //pre-change_game demo versions should have all the globals we currently use
                         _ => match chapter {
                             0 => 0, //no relevant globals in Chapter Select
                             1 => GLOBALS.len() - 1, //Chapter 1 doesn't have Storage mechanic

@@ -76,7 +76,10 @@ impl VarFinder {
             for name in names {
                 if string.as_str() == name.trim_end_matches("[0]") {
                     if name.ends_with("[0]") {
-                        pointerMap.entry(name).or_insert_with(|| Address::from(process.read_pointer_path::<u64>(self.arrAddr, self.ps,&[offset,0x0,0x90]).unwrap_or_default()));
+                        match self.ps { 
+                            ps64 => { pointerMap.entry(name).or_insert_with(|| Address::from(process.read_pointer_path::<u64>(self.arrAddr, self.ps,&[offset,0x0,0x90]).unwrap_or_default())); }
+                            _ => { pointerMap.entry(name).or_insert_with(|| Address::from(process.read_pointer_path::<u64>(self.arrAddr, self.ps,&[offset,0x64]).unwrap_or_default())); }
+                        };
                     } else {
                         pointerMap.entry(name).or_insert_with(|| process.read_pointer(self.arrAddr + offset, self.ps).unwrap_or_default());
                     }
