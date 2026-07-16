@@ -1,6 +1,6 @@
 #![allow(nonstandard_style)]
 
-use std::{fs::read};
+use std::{fs::read, ops::Add};
 use asr::{
     future::{next_tick,sleep}, PointerSize, Process,
     watcher::{Watcher,Pair}, Address, string::ArrayCString, signature::Signature, timer, timer::TimerState, time_util::{Instant},
@@ -494,6 +494,9 @@ async fn main() {
                     //asr::timer::set_variable("Room Name Pointer Address",format!("{:X}",room_name_addr0.value()).as_str());
                     //asr::timer::set_variable("Room Name Address",format!("{:X}",room_name_addr.value()).as_str());
                     timer::set_variable("Room Name",cur_room);
+
+                    timer::set_variable("text",get_obj_str::<128>(&process, ps, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default());
+                    timer::set_variable("writer addr",format!("{}",obj_addr_map.get(&"obj_writer".to_owned()).unwrap_or(&Address::NULL)).as_str());
 
                     //timer::set_variable_float("Plot",globalFinder.readNum::<f64>(&process, &stringsList, "plot"));
 

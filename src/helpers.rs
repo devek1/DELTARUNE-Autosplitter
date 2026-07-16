@@ -132,11 +132,11 @@ fn get_first_instance(process : &Process, ps : PointerSize, obj : Address) -> Ad
     let Ok(obj_prop) = process.read_pointer(obj.add(match ps {ps64=>0x18,_=>0xC}),ps) else {
         return Address::NULL;
     };
-    let instCount = process.read::<u32>(obj_prop.add(0x78)).unwrap_or_default();
+    let instCount = process.read::<u32>(obj_prop.add(match ps {ps64=>0x78,_=>0x40})).unwrap_or_default();
     if instCount == 0 { return Address::NULL; }
-    let node = process.read_pointer(obj_prop.add(0x68),ps).unwrap_or_default();
+    let node = process.read_pointer(obj_prop.add(match ps {ps64=>0x68,_=>0x38}),ps).unwrap_or_default();
     timer::set_variable("last found first node",format!("{}",node).as_str());
-    process.read_pointer(node.add(0x10),ps).unwrap_or(Address::NULL)
+    process.read_pointer(node.add(match ps {ps64=>0x10,_=>0x8}),ps).unwrap_or(Address::NULL)
 }
 
 fn get_all_instances(process : &Process, ps : PointerSize, obj : Address) -> Vec<Address> {
@@ -144,11 +144,11 @@ fn get_all_instances(process : &Process, ps : PointerSize, obj : Address) -> Vec
     let Ok(obj_prop) = process.read_pointer(obj.add(match ps {ps64=>0x18,_=>0xC}),ps) else {
         return vec;
     };
-    let instCount = process.read::<u32>(obj_prop.add(0x78)).unwrap_or_default();
+    let instCount = process.read::<u32>(obj_prop.add(match ps {ps64=>0x78,_=>0x40})).unwrap_or_default();
     if instCount == 0 { return vec; }
-    let mut node = process.read_pointer(obj_prop.add(0x68),ps).unwrap_or_default();
+    let mut node = process.read_pointer(obj_prop.add(match ps {ps64=>0x68,_=>0x38}),ps).unwrap_or_default();
     for i in 0..instCount {
-        vec.push(process.read_pointer(node.add(0x10),ps).unwrap_or_default());
+        vec.push(process.read_pointer(node.add(match ps {ps64=>0x10,_=>0x8}),ps).unwrap_or_default());
         if i<instCount-1 { node = process.read_pointer(node,ps).unwrap_or_default(); }
     }
     vec
@@ -179,7 +179,16 @@ pub fn get_obj_inst(process : &Process, ps : PointerSize, objMap : &HashMap<Stri
 }
 
 pub fn get_obj_var<T: bytemuck::Pod + Default>(process : &Process, ps : PointerSize, objMap : &HashMap<String,Address>, stringsList : &HashMap<u32,String>, _obj : &str, name : &str) -> T {
-    get_inst_var(&process,ps,stringsList,get_obj_inst(process,ps,objMap,_obj),name)
+    get_inst_var::<T>(&process,ps,stringsList,get_obj_inst(process,ps,objMap,_obj),name)
+}
+
+pub fn get_obj_str<const len : usize>(process : &Process, ps : PointerSize, objMap : &HashMap<String,Address>, stringsList : &HashMap<u32,String>, _obj : &str, name : &str) -> ArrayCString<len> {
+    let inst = get_obj_inst(process,ps,objMap,_obj);
+    let Ok(finder) = VarFinder::try_new(process, ps, inst) else {
+        return ArrayCString::<len>::default();
+    };
+    let ptr = finder.findVarPtr(process, stringsList, name);
+    process.read_pointer_path(ptr, ps, &[0x0,0x0,0x0]).unwrap_or_default()
 }
 
 pub fn chapter1ify(version : &EngineVersion, objName : &str) -> String {
