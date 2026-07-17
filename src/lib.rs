@@ -1,8 +1,8 @@
 #![allow(nonstandard_style)]
 
-use std::{fs::read, ops::Add};
+use std::{fs::read};
 use asr::{
-    future::{next_tick,sleep}, PointerSize, Process,
+    future::{next_tick}, PointerSize, Process,
     watcher::{Watcher,Pair}, Address, string::ArrayCString, signature::Signature, timer, timer::TimerState, time_util::{Instant},
     settings::Gui, file_format::pe
 };
@@ -155,7 +155,11 @@ async fn main() {
                     Ch5_v247 => "Ch1-5, Ch5 v0.0.247",
                 });
                 if !settings.allow_unsupported_version && matches!(game_version,Invalid) {
-                    loop {next_tick().await;}
+                    loop {
+                        settings.update();
+                        if settings.allow_unsupported_version { break; }
+                        next_tick().await;
+                    }
                 }
 
                 let ps = match version {
@@ -438,6 +442,26 @@ async fn main() {
 
                 let mut item_tracker = HashSet::<Item>::new();
 
+                let objVar = |obj : &str, var : &str| get_obj_var(&process, ps, &obj_addr_map, &stringsList, obj, var);
+
+                let arrItem = | arr : Address, index : u64 | process.read::<f64>(arr.add(index*0x10)).unwrap_or_default();
+                
+                let arrCheck = | arr, val, indexStart, indexEnd | -> bool {
+                    for i in indexStart..=indexEnd {
+                        if arrItem(arr,i) == val {
+                            return true;
+                        }
+                    }
+                    false
+                };
+
+                let ptrFindTiming = Instant::now();
+                for _ in 0..100 {
+                    globalFinder.populatePtrMap(&process, &stringsList, &mut globalPtrs, &GLOBALS);
+                }
+                asr::print_message(format!("populated pointer map 100 times in {}",ptrFindTiming.elapsed().as_secs_f64()).as_str());
+                
+
 
 
 
@@ -448,6 +472,10 @@ async fn main() {
                 // TODO: Load some initial information from the process.
                 loop {
                     settings.update();
+                    if !settings.allow_unsupported_version && matches!(game_version,Invalid) {
+                        next_tick().await;
+                        continue;
+                    }
 
                     //if some global pointers weren't found yet, look for them again. Exception for some that are expected to be missing under specific circumstances
                     if globalPtrs.keys().len() < match version {
@@ -495,7 +523,7 @@ async fn main() {
                     //asr::timer::set_variable("Room Name Address",format!("{:X}",room_name_addr.value()).as_str());
                     timer::set_variable("Room Name",cur_room);
 
-                    timer::set_variable("text",get_obj_str::<128>(&process, ps, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default());
+                    timer::set_variable("text",get_obj_str::<128>(&process, ps, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default()); //
                     timer::set_variable("writer addr",format!("{}",obj_addr_map.get(&"obj_writer".to_owned()).unwrap_or(&Address::NULL)).as_str());
 
                     //timer::set_variable_float("Plot",globalFinder.readNum::<f64>(&process, &stringsList, "plot"));
@@ -521,7 +549,7 @@ async fn main() {
                             }
                         }
                         5 if prev_room == "PLACE_CONTACT" => {
-                            let namer_event = _namer.update_infallible(get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT"));
+                            let namer_event = _namer.update_infallible(objVar("DEVICE_NAMER","EVENT")); //get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT")
                             timer::set_variable_float("Namer Event",namer_event.current);
                             if !matches!(settings.ch5_start_on_prev,Ch5StartOnPrev::Exclusively) {
                                 if cur_room == "PLACE_MENU"
@@ -542,7 +570,7 @@ async fn main() {
                             }
                         }
                         _ if prev_room == "PLACE_MENU" => {
-                            let namer_event = _namer.update_infallible(get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT"));
+                            let namer_event = _namer.update_infallible(objVar("DEVICE_NAMER","EVENT")); //get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT")
                             timer::set_variable_float("Namer Event",namer_event.current);
                             if namer_event.current == 75.0 && namer_event.old != 75.0 {
                                 //tempVar = 0;
@@ -651,11 +679,6 @@ async fn main() {
                                     _ => false
                                 });
 
-                                /*let great_door_con = great_door_con_ptr.update_value(&process);
-                                timer::set_variable_float("doorCon",great_door_con.current);
-                                let king_pos = king_pos_ptr.update_value(&process);
-                                timer::set_variable_float("kingPos",king_pos.current);*/
-
 
 
                                 // OST% ending (delayed split after room transition)
@@ -688,7 +711,7 @@ async fn main() {
                                         ("room_cc_6f","room_cc_throneroom") => "ch1_exit_kround2",
                                         ("room_cc_throneroom","room_cc_preroof") => "ch1_exit_throne_room",
                                         ("room_cc_preroof","room_cc_kingbattle") => "ch1_exit_preking",
-                                        ("room_cc_kingbattle","room_cc_prefountain") => "ch1_post_king",
+                                        ("room_cc_kingbattle","room_cc_prefountain") => delay_split_frames("ch1_post_king",10).await,
                                         ("room_cc_prefountain","room_cc_fountain") => "ch1_enter_fountain",
                                         ("room_cc_fountain","room_school_unusedroom") => "ch1_seal_fountain",
                                         ("room_krisroom","room_ed") => { //setup for OST% ending split, which is delayed
@@ -959,7 +982,7 @@ async fn main() {
                                         ("room_dw_fcastle_foyer","room_dw_fcastle_cafe") => "ch5_enter_right",
                                         ("room_dw_fcastle_right_endingscene","room_dw_fcastle_foyer") => "ch5_exit_right",
                                         ("room_dw_fcastle_foyer","room_dw_fcastle_asgore") => "ch5_beanstalk",
-                                        ("room_shop","room_dw_cliff_shop") if check_val_in_arr(&process, ps, global_ptr(&globalPtrs, "keyitem[0]"),
+                                        ("room_shop","room_dw_cliff_shop") if arrCheck(global_ptr(&globalPtrs, "keyitem[0]"),
                                                                      32.0, 0, 11) => "ch5_pink_shop",
                                         ("room_dw_fcastle_top_pinkdoor","room_dw_fcastle_pinkroom") => "ch5_pink_door",
                                         ("room_dw_fcastle_pinkroom","room_dw_pink_encounter") => "ch5_pink_start",

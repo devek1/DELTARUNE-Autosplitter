@@ -20,7 +20,7 @@ pub struct VarFinder {
     pub numAddr : Address,
     pub arrAddr : Address,
     ps : PointerSize,
-    jmp : usize
+    jmp : usize,
 }
 
 impl VarFinder {
@@ -52,7 +52,7 @@ impl VarFinder {
     }*/
 
     //Find a pointer to a specific variable, this can be used to find initial pointers for variables of complex types
-    pub fn findVarPtr(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> Address {
+    pub fn getVarPtr(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> Address {
         for offset in (0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64)*self.jmp as u64).step_by(self.jmp) {
             let stringID = process.read::<u32>(self.arrAddr + offset + match self.ps {ps64=>0x8,_=>0x4}).unwrap_or_default();
             if stringID < 100000 {
@@ -68,6 +68,7 @@ impl VarFinder {
     //Populate a HashMap with pointers for variables from provided list
     pub fn populatePtrMap(&self, process: &Process, stringsList: &HashMap<u32, String>, pointerMap : &mut HashMap<&'static str, Address>, names: &[&'static str]) {
         for offset in (0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64)*self.jmp as u64).step_by(self.jmp) {
+            if pointerMap.len() >= names.len() { return; }
             let stringID = process.read::<u32>(self.arrAddr + offset + match self.ps {ps64=>0x8,_=>0x4}).unwrap_or_default();
             if stringID < 100000 {
                 continue;
@@ -86,7 +87,7 @@ impl VarFinder {
                     } else {
                         pointerMap.entry(name).or_insert_with(|| process.read_pointer(self.arrAddr + offset, self.ps).unwrap_or_default());
                     }
-                    asr::print_message(format!("global.{} found at {}",name,pointerMap.get(name).unwrap_or(&Address::NULL)).as_str());
+                    //asr::print_message(format!("global.{} found at {}",name,pointerMap.get(name).unwrap_or(&Address::NULL)).as_str());
                 }
             }
             /*if names.contains(&name.as_str())  {
@@ -187,7 +188,7 @@ pub fn get_obj_str<const len : usize>(process : &Process, ps : PointerSize, objM
     let Ok(finder) = VarFinder::try_new(process, ps, inst) else {
         return ArrayCString::<len>::default();
     };
-    let ptr = finder.findVarPtr(process, stringsList, name);
+    let ptr = finder.getVarPtr(process, stringsList, name);
     process.read_pointer_path(ptr, ps, &[0x0,0x0,0x0]).unwrap_or_default()
 }
 

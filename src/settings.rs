@@ -97,6 +97,8 @@ pub struct Settings {
     ch1_exit_preking : bool,
     ///End King battle
     ch1_king : bool,
+    ///End King battle (position check)
+    ch1_king_alt : bool,
     ///Exit King battle room
     ch1_post_king : bool,
     ///Enter Fountain
