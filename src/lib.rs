@@ -148,7 +148,7 @@ async fn main() {
                     _ => Invalid,
                 };
                 timer::set_variable("Game Version", match game_version {
-                    Invalid => "Invalid",
+                    Invalid => "Invalid or unrecognized",
                     SP => "SURVEY_PROGRAM",
                     D109 => "Demo v1.09",
                     D110 => "Demo v1.10",
@@ -295,7 +295,7 @@ async fn main() {
 
                 //temporary unreachables for pointers I haven't found yet
                 let objArrOffset = match version {
-                    GMS2_v2_2_0 => 0x0, //temp
+                    GMS2_v2_2_0 => todo!(),
                     GMS2_2022_1 => 0x4DCCEC,
                     GMS2_2022_2 => 0x4DE60C,
                     GM_LTS2022_0_3_99 => 0x69FA98,
@@ -365,7 +365,7 @@ async fn main() {
 
                 
                 let globalOffset : u64 = match version {
-                    GMS2_v2_2_0 => 0x48E5DC,
+                    GMS2_v2_2_0 => todo!(), //0x48E5DC,
                     GMS2_2022_1 => 0x6FCF38,
                     GMS2_2022_2 => 0x6FE860,
                     GM_LTS2022_0_3_99 => 0x6A1CA8,

@@ -71,36 +71,6 @@ impl VarFinder {
         Address::NULL
     }
 
-    //Populate a HashMap with pointers for variables from provided list
-    pub fn populatePtrMap(&self, process: &Process, stringsList: &HashMap<u32, String>, pointerMap : &mut HashMap<&'static str, Address>, names: &[&'static str]) {
-        for offset in (0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64)*self.jmp as u64).step_by(self.jmp) {
-            if pointerMap.len() >= names.len() { return; }
-            let stringID = process.read::<u32>(self.arrAddr + offset + match self.ps {ps64=>0x8,_=>0x4}).unwrap_or_default();
-            if stringID < 100000 {
-                continue;
-            }
-            let Some(string) = stringsList.get(&(stringID - 100000)) else {
-                continue;
-            };
-            for name in names {
-                if string.as_str() == name.trim_end_matches("[0]") {
-                    if name.ends_with("[0]") {
-                        match self.ps { //there's no direct support for reading a pointer from a pointer path, so we need to specifically read different types (64-bit address vs 32-bit address) depending on 64-bit vs 32-bit
-                            ps64 => { pointerMap.entry(name).or_insert_with(|| Address::from(process.read_pointer_path::<u64>(self.arrAddr, self.ps,&[offset,0x0,0x90]).unwrap_or_default())); }
-                            _ => { pointerMap.entry(name).or_insert_with(|| Address::from(process.read_pointer_path::<u32>(self.arrAddr, self.ps,&[offset,0x0,0x64]).unwrap_or_default())); }
-                        }
-                    } else {
-                        pointerMap.entry(name).or_insert_with(|| process.read_pointer(self.arrAddr + offset, self.ps).unwrap_or_default());
-                    }
-                    //asr::print_message(format!("global.{} found at {}",name,pointerMap.get(name).unwrap_or(&Address::NULL)).as_str());
-                }
-            }
-            /*if names.contains(&name.as_str())  {
-                pointerMap.insert(name.clone().as_str(),process.read_pointer(self.arrAddr + offset, self.ps).unwrap_or_default());
-            }*/
-        }
-    }
-
     //Immediately read simple value from a variable, this is used to read numeric variable values from instances of objects without needing
     //not strictly limited to numbers, but most other types require further pointers
     pub fn readNum<T: bytemuck::Pod + Default>(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> T {
@@ -250,11 +220,6 @@ pub fn check_text(process : &Process, ps : PointerSize, stringsList: &HashMap<u3
         }
     }
     false
-}
-
-//if a global was previously missed when populating the global pointers map, try searching for it again along with any other missing ones. Otherwise simply read from the pointer map
-pub fn global_ptr(globalPtrs : &HashMap<&'static str,Address>, name : &str ) -> Address {
-    *globalPtrs.get(name).unwrap_or(&Address::NULL)
 }
 
 //values in an array are located at pointer offsets 0x0,0x90,(8*index) from the array's own pointer. This function takes the address array's pointer and gets the address to index 0's pointer, which can then be used to more performantly find any element in the array
