@@ -193,12 +193,14 @@ pub enum Item {
 
 pub fn item_check_slot(process : &Process, tracker : &mut HashSet<Item>, item_map : &HashMap<(ItemType,i32),Item>, chapter : i32, T : ItemType, ptr : Address) {
     let item = process.read::<f64>(ptr).unwrap_or_default() as i32;
-    if item == 0 || item == i32::MAX || item == i32::MIN { return; }
-    asr::timer::set_variable_int("last item checked",item);
+    //if item == 0 || item == i32::MAX || item < 0 { return; }
     tracker.insert(match (&T,item) {
         (Item,1) if chapter>3 => DarkerCandy,
         (Item,18|19|20|21) if chapter>2 => RottenTea,
-        _ => item_map[&(T,item)].clone()
+        _ => match item_map.get(&(T,item)) {
+            Some(i) => i.clone(),
+            None => {return; }
+        }
     });
 }
 
