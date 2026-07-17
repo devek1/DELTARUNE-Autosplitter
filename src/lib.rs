@@ -7,7 +7,6 @@ use asr::{
     settings::Gui, file_format::pe
 };
 use std::collections::{HashMap, HashSet};
-use core::time::Duration;
 use crate::{EngineVersion::*, GameVersion::*};
 
 mod settings;
@@ -425,10 +424,6 @@ async fn main() {
                     GM_LTS2022_0_3_104 => &[0x6AAF90, 0x0,  0x0,  0x0],
                 });
 
-                //let mut tempVar = 0;
-                let mut ost_end_active = false;
-                let mut ost_end_started = Instant::now();
-
                 //const items_goal : usize = 160;
 
                 let item_map = HashMap::from(item_map_init_array());
@@ -506,7 +501,6 @@ async fn main() {
 
                     if state == TimerState::NotRunning || state == TimerState::Ended {
                         //tempVar = 0;
-                        ost_end_active = false;
                         if !splits.is_empty() { splits.clear(); }
                         if !item_tracker.is_empty() { item_tracker.clear(); }
                     }
@@ -517,7 +511,6 @@ async fn main() {
                         1 => {
                             if prev_room != cur_room && cur_room == "PLACE_CONTACT" {
                                 //tempVar = 0;
-                                ost_end_active = false;
                                 start(&settings.auto_start,&mut splits,&mut item_tracker);
                             }
                         }
@@ -528,17 +521,13 @@ async fn main() {
                                 if cur_room == "PLACE_MENU"
                                 {
                                     if namer_event.current == 75.0 && namer_event.old == 74.0 {
-                                        //tempVar = 0;
-                                        ost_end_active = false;
-                                start(&settings.auto_start,&mut splits,&mut item_tracker);
+                                        start(&settings.auto_start,&mut splits,&mut item_tracker);
                                     }
                                 }
                             }
                             if !matches!(settings.ch5_start_on_prev,Ch5StartOnPrev::No) {
                                 if prev_room == "PLACE_MENU" && cur_room == "room_krisroom" && namer_event.old != 75.0 {
-                                    //tempVar = 0;
-                                    ost_end_active = false;
-                                start(&settings.auto_start,&mut splits,&mut item_tracker);
+                                    start(&settings.auto_start,&mut splits,&mut item_tracker);
                                 }
                             }
                         }
@@ -546,8 +535,6 @@ async fn main() {
                             let namer_event = _namer.update_infallible(objVar("DEVICE_NAMER","EVENT")); //get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT")
                             timer::set_variable_float("Namer Event",namer_event.current);
                             if namer_event.current == 75.0 && namer_event.old != 75.0 {
-                                //tempVar = 0;
-                                ost_end_active = false;
                                 start(&settings.auto_start,&mut splits,&mut item_tracker);
                             }
                         }
@@ -657,14 +644,6 @@ async fn main() {
                                     _ => false
                                 });
 
-
-
-                                // OST% ending (delayed split after room transition)
-                                if ost_end_active && ost_end_started.elapsed() >= Duration::from_millis(3600) {
-                                    ost_end_active = false;
-                                    split(&mut splits, &settings, "ch1_ending_ost", false);
-                                }
-
                                 // Chapter 1 room change splits
                                 if room.current != room.old {
                                     split(&mut splits, &settings, match (prev_room,cur_room) {
@@ -692,11 +671,6 @@ async fn main() {
                                         ("room_cc_kingbattle","room_cc_prefountain") => delay_split_frames("ch1_post_king",10).await,
                                         ("room_cc_prefountain","room_cc_fountain") => "ch1_enter_fountain",
                                         ("room_cc_fountain","room_school_unusedroom") => "ch1_seal_fountain",
-                                        ("room_krisroom","room_ed") => { //setup for OST% ending split, which is delayed
-                                            ost_end_active = true;
-                                            ost_end_started = Instant::now();
-                                            ""
-                                        }
                                         _ => ""
                                     },false);
                                 } else {
@@ -706,6 +680,7 @@ async fn main() {
                                         "room_cc_joker" if con.bytes_changed_to(&4.0) => "ch1_beat_jevil",
                                         "room_cc_kingbattle" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch1_king",
                                         "room_krisroom" if text_check.changed_to(&true) => "ch1_ending",
+                                        "room_ed" if objVar("obj_credits","timer") >= 108.0 => "ch1_ending_ost",
                                         _ => ""
                                     },false);
                                 }
@@ -714,8 +689,8 @@ async fn main() {
                             2 => {
 
                                 let con = _con.update_infallible(match cur_room {
-                                    "room_shop_ch2_spamton_ch2" => objVar( "obj_shop_ch2_spamton", "greybgtimer"),
-                                    "room_dw_city_berdly_ch2" => objVar( "obj_spell_snowgrave", "timer"),
+                                    "room_shop_ch2_spamton" => objVar( "obj_shop_ch2_spamton", "greybgtimer"),
+                                    "room_dw_city_berdly" => objVar( "obj_spell_snowgrave", "timer"),
                                     _ => 0.0
                                 });
                                 timer::set_variable_float("LoadedDiskBG/Snowgrave",con.current);
@@ -807,7 +782,7 @@ async fn main() {
 
                                 let flag = _flag.update_infallible(match cur_room {
                                     "room_dw_ch3_man" => process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(930))).unwrap_or_default(),
-                                    "room_dw_city_berdly_ch2" => process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(1047))).unwrap_or_default(),
+                                    "room_dw_snow_zone" => process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(1047))).unwrap_or_default(),
                                     _ => 0.0
                                 });
                                 timer::set_variable_float("Flag",flag.current);
