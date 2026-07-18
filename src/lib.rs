@@ -632,8 +632,9 @@ async fn main() {
                             1 => {
 
                                 let con = _con.update_infallible(match cur_room {
-                                    "room_castle_darkdoor" => objVar(chapter1ify("obj_darkdoorevent").as_str(), "con"),
-                                    "room_cc_joker" => objVar(chapter1ify("obj_joker_body").as_str(), "dancelv"),
+                                    "PLACE_CONTACT" => objVar(&chapter1ify("DEVICE_CONTACT",),"EVENT"),
+                                    "room_castle_darkdoor" => objVar(&chapter1ify("obj_darkdoorevent"), "con"),
+                                    "room_cc_joker" => objVar(&chapter1ify("obj_joker_body"), "dancelv"),
                                     _ => 0.0
                                 });
 
@@ -647,7 +648,6 @@ async fn main() {
                                 // Chapter 1 room change splits
                                 if room.current != room.old {
                                     split(&mut splits, &settings, match (prev_room,cur_room) {
-                                        ("PLACE_CONTACT","room_krisroom") => "ch1_contact",
                                         ("room_krisroom","room_dark1") => "ch1_bedskip",
                                         ("room_insidecloset","room_dark1") => "ch1_school",
                                         ("room_dark7","room_dark_chase1") => "ch1_cliffs",
@@ -675,6 +675,7 @@ async fn main() {
                                     },false);
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
+                                        "PLACE_CONTACT" if con.bytes_changed_from_to(&75.0,&76.0) => "ch1_contact",
                                         "room_castle_darkdoor" if con.bytes_changed_from_to(&7.0, &21.0) => "ch1_castle_town_door",
                                         "room_man" if msc.bytes_changed_to(&601.0) && choice.current == 0.0 => "ch1_egg",
                                         "room_cc_joker" if con.bytes_changed_to(&4.0) => "ch1_beat_jevil",
