@@ -34,6 +34,7 @@ enum GameVersion {
 //NOTE: LTS 2022.0 branched from Monthly 2022.9, so LTS 2022.0.__ is strictly newer than Monthly 2022.2
 //specific version numbers taken from OpenGM's GitHub page
 //Also, GameMaker used the "GameMaker Studio 2" branding up to and including version 2022.2, with 2022.3 changing the name of the engine back to simply "GameMaker"
+#[derive(Copy,Clone)]
 enum EngineVersion {
     GMS2_v2_2_0, //SURVEY_PROGRAM
     GMS2_2022_1, //Demo 1.09 and 1.10
@@ -65,6 +66,8 @@ async fn main() {
     // TODO: Set up some general state and settings.
     let mut settings = Settings::register();
     let mut splits = HashSet::<String>::new();
+    let item_map = HashMap::from(item_map_init_array());
+    let mut item_tracker = HashSet::<Item>::new();
     asr::set_tick_rate(60.0);
 
     asr::print_message("Hello, World!");
@@ -106,10 +109,6 @@ async fn main() {
                     GM_LTS2022_0_3_99 => "GameMaker LTS 2022.0.3.99 (64-bit)",
                     GM_LTS2022_0_3_104 => "GameMaker LTS 2022.0.3.104 (64-bit)",
                 });
-                if matches!(version,GMS2_v2_2_0) {
-                    asr::print_message("SURVEY_PROGRAM is currently not supported");
-                    loop {next_tick().await;}
-                }
 
 
                 path = path.replace("DELTARUNE.exe", "data.win");
@@ -211,6 +210,8 @@ async fn main() {
                     else if dir.ends_with(r"chapter3_windows\") { chapter = 3 }
                     else if dir.ends_with(r"chapter4_windows\") { chapter = 4 }
                     else if dir.ends_with(r"chapter5_windows\") { chapter = 5 }
+                } else if matches!(version,GMS2_v2_2_0) {
+                    chapter = 1;
                 }
                 timer::set_variable_int("Chapter",chapter);
 
@@ -279,7 +280,7 @@ async fn main() {
                             break;
                         }
                         if name != "" {
-                            stringsList.insert(i, name.to_string());
+                            stringsList.insert(i + match version {GMS2_v2_2_0=>0,_=>100000}, name.to_string());
 
                             if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
                                 asr::print_limited::<64>(&format_args!("{} found at StringID {}",name,i))
@@ -287,6 +288,34 @@ async fn main() {
                             timer::set_variable_int("last real string index",i);
                         }
                     }
+                    //in SP, the 
+                    if matches!(version,GMS2_v2_2_0) {
+                        let Ok(sListPtr2) = process.read_pointer(DELTARUNE.add(stringsListOffset-0x10),ps) else { loop { next_tick().await; } };
+                        //let strNum = process.read::<u32>(sListPtr.add_signed(strNumOffset)).unwrap_or_default(); //there doesn't seem to be a real length value anywhere around here
+                        //asr::print_message(format!("StringsList length: {}",strNum).as_str());
+                        for i in 0..16384 {
+                            let Ok(namePtr) = process.read_pointer(sListPtr2.add(psBytes*i as u64), ps) else {
+                                continue;
+                            };
+                            if namePtr.is_null() {  continue; }
+                            let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();
+                            let name = _name.validate_utf8().unwrap_or_default();
+                            if name == "@@ObjectContainer@@" {
+                                break;
+                            }
+                            if name != "" {
+                                stringsList.insert(i, name.to_string());
+
+                                if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
+                                    asr::print_limited::<64>(&format_args!("{} found at StringID {}",name,i))
+                                }
+                                timer::set_variable_int("last real string index",i);
+                            }
+                        }
+                    }
+                }
+                if stringsList.is_empty() {
+                    return;
                 }
                 //asr::print_message(format!("StringsList read in {} seconds",stringsListTiming.elapsed().as_secs_f64()).as_str());
                 asr::print_message(format!("Number of strings: {}",stringsList.len()).as_str());
@@ -294,7 +323,7 @@ async fn main() {
 
                 //temporary unreachables for pointers I haven't found yet
                 let objArrOffset = match version {
-                    GMS2_v2_2_0 => todo!(),
+                    GMS2_v2_2_0 => 0x49A5C8,
                     GMS2_2022_1 => 0x4DCCEC,
                     GMS2_2022_2 => 0x4DE60C,
                     GM_LTS2022_0_3_99 => 0x69FA98,
@@ -316,9 +345,6 @@ async fn main() {
                 let mut obj_addr_map = HashMap::<String,Address>::new();
                 'objRetrying: loop {
                     //for testing we temporarily skip object reading in versions that don't have offsets found yet
-                    if matches!(version,GMS2_v2_2_0) {
-                        break;
-                    }
                     let Ok(objArrBase) = process.read_pointer(DELTARUNE.add(objArrOffset),ps) else { continue; };
                     let Ok(objNum) = process.read::<u32>(objArrBase.add(objNumOff)) else {
                         continue;
@@ -326,11 +352,11 @@ async fn main() {
                     if objNum == 0 { continue; }
                     asr::print_message(format!("Number of objects: {}",objNum).as_str());
                     let Ok(arr) = process.read_pointer(objArrBase,ps) else { continue; };
-                    for i in 0..1024u64 {
+                    for i in 0..1024u64 { //might be higher in SP? Seems to go up to 2820. However there are only 342 objects in SP so I doubt it'd matter
                         let Ok(mut objAddr) = process.read_pointer(arr.add(psBytes as u64*i),ps) else { continue 'objRetrying; };
                         for _layer in 1..=10 {
                             if objAddr.is_null() { break; }
-                            let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[objPropOff,0x0,0x0]).unwrap_or_default();
+                            let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[objPropOff,match version { GMS2_v2_2_0 => 0x14, _ => 0 },0x0]).unwrap_or_default();
                             let name = _name.validate_utf8().unwrap_or_default();
                             if name != "" {
                                 /*if matches!(name,"obj_writer"|"obj_moneydisplay"|"DEVICE_NAMER"|"obj_berdly_smoke") {
@@ -363,24 +389,16 @@ async fn main() {
 
 
                 
-                let globalOffset : u64 = match version {
-                    GMS2_v2_2_0 => todo!(), //0x48E5DC,
+                /*let globalOffset : u64 = match version {
+                    GMS2_v2_2_0 => 0x49C3E0, //0x48E5DC,
                     GMS2_2022_1 => 0x6FCF38,
                     GMS2_2022_2 => 0x6FE860,
                     GM_LTS2022_0_3_99 => 0x6A1CA8,
                     GM_LTS2022_0_3_104 => 0x6A9CA8,
-                };
+                };*/
 
-                let mut global = loop {
-                    let Ok(globalAddr) = process.read_pointer(DELTARUNE.add(globalOffset),ps) else { continue; };
-                    if let Ok(_finder) = match ps {
-                        ps64 => LongTermVarReader::try_new(&process,ps,globalAddr),
-                        _ => LongTermVarReader::try_new_alt32(&process,ps,globalAddr)
-                    } {
-                        break _finder;
-                    }
-                };
-                asr::print_message("Found global");
+                let mut global = global_setup(&process, DELTARUNE, version, ps);
+                asr::print_message(&format!("Found global, array starts at {}",global.finder.arrAddr));
 
 
 
@@ -396,7 +414,7 @@ async fn main() {
                 //watchers for object instance variables, strings, values in arrays, etc.
                 //the same watcher may be used for different variables depending on the chapter and room
                 let mut _namer = Watcher::<f64>::new();
-                let mut _con = Watcher::<f64>::new(); //multi-purpose pointer, generally tracks progress of some object-level event
+                let mut _con = Watcher::<f64>::new();
                 //let mut _posX = Watcher::<f32>::new();
                 //let mut _posY = Watcher::<f32>::new();
                 let mut _text_check = Watcher::<bool>::new();
@@ -426,17 +444,13 @@ async fn main() {
 
                 //const items_goal : usize = 160;
 
-                let item_map = HashMap::from(item_map_init_array());
-
-                let mut item_tracker = HashSet::<Item>::new();
-
                 //some helpful closures
                 let chapter1ify = |name : &str| match version {
                     GMS2_2022_1 | GMS2_2022_2 => name.to_owned() + "_ch1",
                     _ => name.to_owned()
                 };
 
-                let objVar = |obj : &str, var : &str| get_obj_var(&process, ps, &obj_addr_map, &stringsList, obj, var);
+                let objVar = |obj : &str, var : &str| get_obj_var(&process, version, &obj_addr_map, &stringsList, obj, var);
 
                 let arrItem = | arr : Address, index : u64 | process.read::<f64>(arr.add(index*0x10)).unwrap_or_default();
                 
@@ -448,12 +462,9 @@ async fn main() {
                     }
                     false
                 };
-                
 
 
-
-
-
+                let mut global_effectiveness_retry_timer: i32 = 5;
 
 
                 asr::print_message(format!("ready for continuous logic after {} seconds",attached.elapsed().as_secs_f64()).as_str());
@@ -463,6 +474,14 @@ async fn main() {
                     if !settings.allow_unsupported_version && matches!(game_version,Invalid) {
                         next_tick().await;
                         continue;
+                    }
+
+                    if global.cache.is_empty() {
+                        global_effectiveness_retry_timer -= 1;
+                        if global_effectiveness_retry_timer <= 0 {
+                            global_effectiveness_retry_timer = 5;
+                            global = global_setup(&process,DELTARUNE,version,ps);
+                        }
                     }
 
 
@@ -491,7 +510,7 @@ async fn main() {
                     //asr::timer::set_variable("Room Name Address",format!("{:X}",room_name_addr.value()).as_str());
                     timer::set_variable("Room Name",cur_room);
 
-                    timer::set_variable("text",get_obj_str::<128>(&process, ps, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default()); //
+                    timer::set_variable("text",get_obj_str::<128>(&process, version, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default()); //
                     timer::set_variable("writer addr",format!("{}",obj_addr_map.get(&"obj_writer".to_owned()).unwrap_or(&Address::NULL)).as_str());
 
                     //timer::set_variable_float("Plot",globalFinder.readNum::<f64>(&process, &stringsList, "plot"));
@@ -610,6 +629,7 @@ async fn main() {
                         timer::set_variable_float("fighting",fighting.current);
                         let plot = _plot.update_infallible(globVal("plot"));
                         timer::set_variable_float("Plot",plot.current);
+                        timer::set_variable_float("Plot Alt",get_inst_var::<f64>(&process,version,&stringsList,process.read_pointer(DELTARUNE.add(0x49C3E0),ps).unwrap_or(Address::NULL),"plot"));
                         let choice = _choice.update_infallible(globVal("choice"));
                         timer::set_variable_float("Choice",choice.current);
                         let msc = _msc.update_infallible(globVal("msc"));
@@ -639,7 +659,7 @@ async fn main() {
                                 });
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_krisroom" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_krisroom" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                   r"* (You decided to go to bed.)/%",
                                                                   r"＊ (ねむることにした)/%"),
                                     _ => false
@@ -697,23 +717,23 @@ async fn main() {
                                 timer::set_variable_float("LoadedDiskBG/Snowgrave",con.current);
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_dw_city_big_2" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_dw_city_big_2" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                        r"* (You got the FreezeRing.)/%",
                                                                        r"＊ (凍てつく指輪を　手に入れた)/%"),
-                                    "room_dw_city_moss" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_dw_city_moss" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                       r"\S1* (You got the ThornRing.)/%",
                                                                       r"\S1＊ (いばらの指輪を　手に入れた)/%",),
-                                    "room_dw_castle_west_cliff" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_dw_castle_west_cliff" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                               r"* (You have too many \cYWEAPONs\cW to&||take \cYPuppetScarf\c0.)/%",
                                                                               r"＊ (\cYぶき\cWが多すぎて&　 \cYパペットマフラー\c0を&　 持てない)/%"),
-                                    "room_torhouse" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_torhouse" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                   r"* (... Susie fell asleep.)/%",
                                                                   r"＊ (…スージィは　ねおちした)/%"),
                                     _ => false
                                 });
 
                                 let text_check2 = _text_check2.update_infallible(match cur_room {
-                                    "room_torhouse" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_torhouse" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                   r"\E1* ... they're already&||asleep.../%",
                                                                   r"\E1＊ …ふたりとも　もう&　 ねむってしまったのね。/%"),
                                     _ => false
@@ -847,10 +867,10 @@ async fn main() {
                                 timer::set_variable_float("MikeAction/GersonDone/Ending",con.current);
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_dw_churchb_man" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_dw_churchb_man" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                   r"* (An Egg was picked up from a&||nearby easel.)/%",
                                                                   r"＊ (近くのイーゼルから\n　 タマゴを　拾いあげた)/%"),
-                                    "room_dw_churchc_prophecies" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_dw_churchc_prophecies" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                        r"* (\cYPrincessRBN\cW was added to your&||\cYARMORs\cW.)/%",
                                                                        r"＊ (\cYプリティリボン\cWが&　 \cYぼうぐ\cWに　加わった)/%"),
                                     _ => false
@@ -904,7 +924,7 @@ async fn main() {
                                 timer::set_variable("CRT Start",crt_start.current.to_string().as_str());
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_town_mid" => check_text(&process, ps, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_town_mid" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
                                                                   r"* (You got the Bread.)/%",
                                                                   r"obj_town_mid_sans_w_slash_Step_0_gml_201_0"),
                                     _ => false
