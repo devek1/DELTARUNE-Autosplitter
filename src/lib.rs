@@ -279,7 +279,7 @@ async fn main() {
                         if name == "@@ObjectContainer@@" {
                             break;
                         }
-                        if name != "" {
+                        if name != "" && name.is_ascii() {
                             stringsList.insert(i + match version {GMS2_v2_2_0=>0,_=>100000}, name.to_string());
 
                             if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
@@ -303,7 +303,7 @@ async fn main() {
                             if name == "@@ObjectContainer@@" {
                                 break;
                             }
-                            if name != "" {
+                            if name != "" && name.is_ascii() {
                                 stringsList.insert(i, name.to_string());
 
                                 if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
@@ -358,7 +358,7 @@ async fn main() {
                             if objAddr.is_null() { break; }
                             let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[objPropOff,match version { GMS2_v2_2_0 => 0x14, _ => 0 },0x0]).unwrap_or_default();
                             let name = _name.validate_utf8().unwrap_or_default();
-                            if name != "" {
+                            if name != "" && name.is_ascii() {
                                 /*if matches!(name,"obj_writer"|"obj_moneydisplay"|"DEVICE_NAMER"|"obj_berdly_smoke") {
                                     asr::print_message(format!("{} found at index {} layer {}, address {}",name,i,_layer,objAddr).as_str());
                                 }*/
@@ -367,6 +367,8 @@ async fn main() {
                             objAddr = process.read_pointer(objAddr,ps).unwrap_or_default();
                         }
                     }
+                    //if a significant amount of objects were missed
+                    if (obj_addr_map.len() as f64) < (0.8 * objNum as f64) { obj_addr_map.clear(); continue; }
                     break;
                 }
                 asr::print_message(format!("objs successfully found: {}",obj_addr_map.len()).as_str());
