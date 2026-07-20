@@ -455,6 +455,8 @@ async fn main() {
                     false
                 };
 
+                let textCheck = |en,jp| check_text(&process,version,&stringsList,get_obj(&obj_addr_map,"obj_writer"),en,jp);
+
 
                 let mut global_effectiveness_retry_timer: i32 = 5;
 
@@ -652,7 +654,7 @@ async fn main() {
                                 });
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_krisroom" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
+                                    "room_krisroom" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, &chapter1ify("obj_writer")),
                                                                   r"* (You decided to go to bed.)/%",
                                                                   r"＊ (ねむることにした)/%"),
                                     _ => false
@@ -681,7 +683,7 @@ async fn main() {
                                         ("room_cc_6f","room_cc_throneroom") => "ch1_exit_kround2",
                                         ("room_cc_throneroom","room_cc_preroof") => "ch1_exit_throne_room",
                                         ("room_cc_preroof","room_cc_kingbattle") => "ch1_exit_preking",
-                                        ("room_cc_kingbattle","room_cc_prefountain") => delay_split_frames("ch1_post_king",10).await,
+                                        ("room_cc_kingbattle","room_cc_prefountain") => "ch1_post_king",
                                         ("room_cc_prefountain","room_cc_fountain") => "ch1_enter_fountain",
                                         ("room_cc_fountain","room_school_unusedroom") => "ch1_seal_fountain",
                                         _ => ""
@@ -692,7 +694,7 @@ async fn main() {
                                         "room_castle_darkdoor" if con.bytes_changed_from_to(&7.0, &21.0) => "ch1_castle_town_door",
                                         "room_man" if msc.bytes_changed_to(&601.0) && choice.current == 0.0 => "ch1_egg",
                                         "room_cc_joker" if con.bytes_changed_to(&4.0) => "ch1_beat_jevil",
-                                        "room_cc_kingbattle" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch1_king",
+                                        "room_cc_kingbattle" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch1_king", //delay_split_frames("ch1_king",10).await
                                         "room_krisroom" if text_check.changed_to(&true) => "ch1_ending",
                                         "room_ed" if objVar("obj_credits","timer") >= 108.0 => "ch1_ending_ost",
                                         _ => ""
@@ -710,25 +712,17 @@ async fn main() {
                                 timer::set_variable_float("LoadedDiskBG/Snowgrave",con.current);
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_dw_city_big_2" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
-                                                                       r"* (You got the FreezeRing.)/%",
-                                                                       r"＊ (凍てつく指輪を　手に入れた)/%"),
-                                    "room_dw_city_moss" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
-                                                                      r"\S1* (You got the ThornRing.)/%",
-                                                                      r"\S1＊ (いばらの指輪を　手に入れた)/%",),
-                                    "room_dw_castle_west_cliff" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
-                                                                              r"* (You have too many \cYWEAPONs\cW to&||take \cYPuppetScarf\c0.)/%",
+                                    "room_dw_cyber_queen_boxing" => textCheck(r"\\EH* C'mon^1, let's go after her!/%", r"\\EH＊ おまえら^1！&　 追っかけるぞ！/%"),
+                                    "room_dw_city_big_2" => textCheck(r"* (You got the FreezeRing.)/%",r"＊ (凍てつく指輪を　手に入れた)/%"),
+                                    "room_dw_city_moss" => textCheck(r"\S1* (You got the ThornRing.)/%",r"\S1＊ (いばらの指輪を　手に入れた)/%",),
+                                    "room_dw_castle_west_cliff" => textCheck(r"* (You have too many \cYWEAPONs\cW to&||take \cYPuppetScarf\c0.)/%",
                                                                               r"＊ (\cYぶき\cWが多すぎて&　 \cYパペットマフラー\c0を&　 持てない)/%"),
-                                    "room_torhouse" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
-                                                                  r"* (... Susie fell asleep.)/%",
-                                                                  r"＊ (…スージィは　ねおちした)/%"),
+                                    "room_torhouse" => textCheck(r"* (... Susie fell asleep.)/%",r"＊ (…スージィは　ねおちした)/%"),
                                     _ => false
                                 });
 
                                 let text_check2 = _text_check2.update_infallible(match cur_room {
-                                    "room_torhouse" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
-                                                                  r"\E1* ... they're already&||asleep.../%",
-                                                                  r"\E1＊ …ふたりとも　もう&　 ねむってしまったのね。/%"),
+                                    "room_torhouse" => textCheck(r"\E1* ... they're already&||asleep.../%",r"\E1＊ …ふたりとも　もう&　 ねむってしまったのね。/%"),
                                     _ => false
                                 });
 
@@ -778,7 +772,8 @@ async fn main() {
                                     },false)
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
-                                          "room_dw_cyber_queen_boxing" if plot.bytes_changed_to(&55.0) => delay_split_frames("ch2_arcade_text", 1).await,
+                                          "room_dw_cyber_queen_boxing" if text_check.changed_to(&false) => "ch2_arcade_text",
+                                          //"room_dw_cyber_queen_boxing" if plot.bytes_changed_to(&55.0) => delay_split_frames("ch2_arcade_text", 1).await,
                                           "room_dw_cyber_music_final" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch2_dj_battle",
                                           "room_dw_city_big_2" if text_check.changed_to(&true) => "ch2_freeze_ring",
                                           "room_dw_city_moss" if text_check.changed_to(&false) => "ch2_thorn_ring",
@@ -860,12 +855,8 @@ async fn main() {
                                 timer::set_variable_float("MikeAction/GersonDone/Ending",con.current);
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_dw_churchb_man" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
-                                                                  r"* (An Egg was picked up from a&||nearby easel.)/%",
-                                                                  r"＊ (近くのイーゼルから\n　 タマゴを　拾いあげた)/%"),
-                                    "room_dw_churchc_prophecies" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
-                                                                       r"* (\cYPrincessRBN\cW was added to your&||\cYARMORs\cW.)/%",
-                                                                       r"＊ (\cYプリティリボン\cWが&　 \cYぼうぐ\cWに　加わった)/%"),
+                                    "room_dw_churchb_man" => textCheck(r"* (An Egg was picked up from a&||nearby easel.)/%",r"＊ (近くのイーゼルから\n　 タマゴを　拾いあげた)/%"),
+                                    "room_dw_churchc_prophecies" => textCheck(r"* (\cYPrincessRBN\cW was added to your&||\cYARMORs\cW.)/%",r"＊ (\cYプリティリボン\cWが&　 \cYぼうぐ\cWに　加わった)/%"),
                                     _ => false
                                 });
 
@@ -917,9 +908,7 @@ async fn main() {
                                 timer::set_variable("CRT Start",crt_start.current.to_string().as_str());
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_town_mid" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, "obj_writer"),
-                                                                  r"* (You got the Bread.)/%",
-                                                                  r"obj_town_mid_sans_w_slash_Step_0_gml_201_0"),
+                                    "room_town_mid" => textCheck(r"* (You got the Bread.)/%",r"＊ (パンを　てにいれた)/%"),
                                     _ => false
                                 });
 
