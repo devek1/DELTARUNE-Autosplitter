@@ -1,627 +1,74 @@
 #![allow(nonstandard_style)]
 
-use std::fs::{read};
+use std::{fs::read};
 use asr::{
-    future::next_tick, PointerSize, Process, deep_pointer::DeepPointer,
-    watcher::{Watcher,Pair}, Address, string::ArrayCString, signature::Signature, timer, timer::TimerState, time_util::Instant,
-    settings::{Map,Gui,gui::Title}, file_format::pe
+    Address, PointerSize, Process, file_format::pe, future::{next_tick, retry}, settings::Gui,
+    signature::Signature, string::ArrayCString, time_util::Instant,
+    timer::{self, TimerState}, watcher::{Pair, Watcher}
 };
-use std::collections::{HashSet};
-use core::time::Duration;
-use crate::Ver::{*};
+use std::collections::{HashMap, HashSet};
+use self::{EngineVersion::*, GameVersion::*};
+
+mod settings;
+mod helpers;
+mod item_tracking;
+
+use settings::*;
+use helpers::*;
+use item_tracking::{*,ItemType::{Weapon,Armor,KeyItem,ItemLW}};
 
 asr::async_main!(stable);
 
-enum Ver {
+enum GameVersion {
     Invalid,
-    SP,
-    D109,
-    D110,
-    D115,
-    D119,
-    Ch4_v102, //for Ch3
-    Ch5_v244, //for All Items
-    Ch5_v247
+    SP, //original Ch1-only release, 
+    D109, //version with Save Wrong Warping
+    D110, //last non-beta Demo version on Steam
+    D115, //last 32-bit release, last release of pre-change_game beta branch on Steam
+    D119, //latest Demo version on Steam and only version on Itch.io
+    Ch4_v102, //for Ch3 and hypothetical patch-swap runs (Tenna fast static)
+    Ch5_v244, //for All Items and literal-ASC (JusticeAxe exploit. Note that the ASC category on the boards doesn't allow using this exploit)
+    Ch5_v247 //currently latest version
 }
 
-#[derive(Gui)]
-enum PauseTiming {
-    /// Individual chapter run rules
-    SingleChapter,
-    /// All Chapters rules
-    #[default]
-    AllChapters,
-    /// OST% timing (Chapters 1, 3, 4, and 5 end on credits music start)
-    OST,
-    /// Demo/per-chapter OST% timing (EVERY chapter ends on credits song start)
-    OSTLateCh2
+//NOTE: LTS 2022.0 branched from Monthly 2022.9, so LTS 2022.0.__ is strictly newer than Monthly 2022.2
+//specific version numbers taken from OpenGM's GitHub page
+//Also, GameMaker used the "GameMaker Studio 2" branding up to and including version 2022.2, with 2022.3 changing the name of the engine back to simply "GameMaker"
+#[derive(Copy,Clone)]
+enum EngineVersion {
+    GMS2_v2_2_0, //SURVEY_PROGRAM
+    GMS2_2022_1, //Demo 1.09 and 1.10 (presumably also 1.08)
+    GMS2_2022_2, //Demo 1.15 (presumably the whole 1.12-1.15 branch)
+    GM_LTS2022_0_3_99, //Demo 1.19 and Ch1-4 v1.02 (everything from Demo 1.19 [potentially even back to 1.17 or 1.16] to Ch1-4 v1.04)
+    GM_LTS2022_0_3_104, //Ch1-5 v244 and v247 (everything from Ch1-4 v1.05 beta to now)
 }
 
-#[derive(Gui)]
-enum AutoStart {
-    /// Start the timer, resetting if it was already running
-    #[default]
-    AutoReset,
-    /// Start the timer, unpause IGT if already running
-    AutoStartAndUnpause,
-    /// Start the timer, if it was not already running
-    AutoStart,
-    /// Do nothing
-    Off
-}
 
-#[derive(Gui)]
-enum Ch5StartOnPrev {
-    ///No
-    #[default]
-    No,
-    ///Yes
-    Yes,
-    ///Exclusively
-    Exclusively
-}
-
-#[derive(Gui)]
-struct Settings {
-
-    ///General Settings
-    gen_title : Title,
-    ///On creating a new file:
-    auto_start : AutoStart,
-    ///Pause the timer between chapters
-    #[default = true]
-    ac_pause_timer: bool,
-    ///Timing of the pauses
-    chapter_pause_timing : PauseTiming,
-    ///Also unpause from loading a savefile
-    ac_unpause_loadsave: bool,
-
-
-    ///Chapter 1: The Beginning
-    ch1_title : Title,
-    ///CONTACT
-    ch1_contact : bool,
-    ///Enter Dark World (Bed Skip)
-    ch1_bedskip : bool,
-    ///Enter Dark World (from school)
-    ch1_school : bool,
-    ///Enter Chase 1 room
-    ch1_cliffs : bool,
-    ///Castle Town (Door Close)
-    ch1_castle_town_door : bool,
-    ///Castle Town (Room Change)
-    ch1_castle_town_room : bool,
-    ///Field of Hopes and Dreams
-    ch1_field : bool,
-    ///Great Board
-    ch1_board : bool,
-    ///Enter Bake Sale
-    ch1_enter_bake_sale : bool,
-    ///Obtain Egg
-    ch1_egg : bool,
-    ///Enter Forest Maze
-    ch1_enter_forest_maze : bool,
-    ///Exit Forest (Susie & Lancer battle room)
-    ch1_susie_lancer_exit : bool,
-    ///Enter Prison Cell (captured)
-    ch1_get_captured : bool,
-    ///Escape Prison
-    ch1_escape_prison : bool,
-    ///Enter Elevator
-    ch1_enter_elevator : bool,
-    ///Exit K. Round 2 battle room
-    ch1_exit_kround2 : bool,
-    ///Exit Throne Room
-    ch1_exit_throne_room : bool,
-    ///Exit Pre-King battle room
-    ch1_exit_preking : bool,
-    ///End King battle
-    ch1_king : bool,
-    ///Exit King battle room
-    ch1_post_king : bool,
-    ///Enter Fountain
-    ch1_enter_fountain : bool,
-    ///Seal Fountain
-    ch1_seal_fountain : bool,
-    ///Ending
-    ch1_ending : bool,
-    ///(OST%) Ending
-    ch1_ending_ost : bool,
-    ///Ch1 All Bosses Splits
-    #[heading_level = 2]
-    ch1_ab_splits : Title,
-    ///Warp from Castle to Field
-    ch1_cf_warp : bool,
-    ///Warp from Field to Bake Sale
-    ch1_fb_warp : bool,
-    ///Warp from Bake Sale to Castle
-    ch1_bc_warp : bool,
-    ///Enter Jevil
-    ch1_enter_jevil : bool,
-    ///Defeat Jevil
-    ///
-    ///This autosplit does not work if you remove THE WORLD REVOLVING from the game files (mus\joker.ogg) in non-SURVEY_PROGRAM versions.
-    ch1_beat_jevil : bool,
-    ///Exit Jevil battle room
-    ch1_exit_jevil : bool,
-
-
-    ///Chapter 2: A Cyber's World
-    ch2_title : Title,
-    ///Enter Cyber World (Bed Skip)
-    ch2_bedskip : bool,
-    ///Enter Cyber World (from Librarby)
-    ch2_library : bool,
-    ///End Punch-Out minigame (textbox close)
-    ///
-    ///This autosplit does not work if you remove A CYBER'S WORLD? from the game files (mus\cyber.ogg) - which is also illegal.
-    ch2_arcade_text : bool,
-    ///End Punch-Out minigame (room exit)
-    ch2_arcade_room : bool,
-    ///End Sweet Cap'n Cakes battle
-    ch2_dj_battle : bool,
-    ///Enter Sweet Cap'n Cakes' shop room
-    ch2_dj_shop : bool,
-    ///Exit Ragger2 room
-    ch2_ragger2_room : bool,
-    ///Exit Cyber Field
-    ch2_cyber_field : bool,
-    ///Warp from Cyber Field to Trash Zone (normally)
-    ch2_cf_tz_warp : bool,
-    ///Warp from Cyber Field to Trash Zone (with Door Overflow)
-    ch2_cf_tz_skip : bool,
-    ///Warp from Cyber Field to Mansion (normally)
-    ch2_cf_m_warp : bool,
-    ///Warp from Cyber Field to Mansion (with Door Overflow)
-    ch2_cf_m_skip : bool,
-    ///Warp from Trash Zone to Cyber Field
-    ch2_tz_cf_warp : bool,
-    ///Warp from Trash Zone to Mansion
-    ch2_tz_m_warp : bool,
-    ///Warp from Mansion to Cyber Field
-    ch2_m_cf_warp : bool,
-    ///Warp from Mansion to Trash Zone
-    ch2_m_tz_warp : bool,
-    ///Obtain Egg (both sources)
-    ch2_egg : bool,
-    ///Exit Mouse 2 Puzzle room
-    ch2_maus_2 : bool,
-    ///Exit Berdly 2 battle room (Side A)
-    ch2_berdly2_mr : bool,
-    ///Exit Spamton battle room
-    ch2_spamton_room : bool,
-    ///Exit Cyber City (captured by Queen)
-    ch2_cyber_city : bool,
-    ///Enter Mansion Entrance save point room
-    ch2_mansion_escape : bool,
-    ///Exit Mansion Entrance save point room
-    ch2_start_pandora : bool,
-    ///Exit Tasque Manager battle room
-    ch2_tasque_manager_room : bool,
-    ///Exit Mauswheel battle room
-    ch2_mauswheel : bool,
-    ///Enter Acid Tunnel
-    ch2_enter_acid : bool,
-    ///Exit Acid Tunnel
-    ch2_exit_acid : bool,
-    ///Exit Queen battle room
-    ch2_queen_room : bool,
-    ///End Giga Queen battle
-    ch2_giga_queen : bool,
-    ///Enter Fountain
-    ch2_enter_fountain : bool,
-    ///Seal Fountain
-    ch2_seal_fountain : bool,
-    ///Ending (Full Game)
-    ch2_ending_ac : bool,
-    ///Ending (IL)
-    ch2_ending_il : bool,
-    ///Ending (Demo/IL OST%)
-    ch2_ending_ost : bool,
-    ///All Bosses Splits
-    #[heading_level = 2]
-    ch2_ab_title : Title,
-    ///Obtain Loaded Disk
-    ch2_load_disk : bool,
-    ///Insert Loaded Disk
-    ch2_insert_disk : bool,
-    ///Defeat basement NEO
-    ///
-    ///This autosplit does not work if you remove BIG SHOT from the game files (mus\spamton_neo_mix_ex_wip.ogg).
-    ch2_defeat_neo_ab : bool,
-    ///Exit basement NEO room
-    ch2_exit_neo : bool,
-    ///Side B Splits
-    #[heading_level = 2]
-    ch2_sideb_title : Title,
-    ///Obtain FreezeRing
-    ch2_freeze_ring : bool,
-    ///Obtain ThornRing (original source)
-    ch2_thorn_ring : bool,
-    ///SnowGrave
-    ch2_snowgrave : bool,
-    ///Exit Berdly 2 battle room (Side B)
-    ch2_sideb_berdly2 : bool,
-    ///End fountain Spamton NEO battle
-    ch2_sideb_neo : bool,
-    ///Thorny Done (Open PuppetScarf Chest in Castle Town with no space)
-    ch2_thorny_ending : bool,
-
-
-    ///Chapter 3: Late Night
-    ch3_title : Title,
-    ///Enter Board 1 (True Reset)
-    ch3_enter_round1 : bool,
-    ///Enter Cooking Show
-    ch3_enter_cooking : bool,
-    ///Enter Green Room (post-Board 1)
-    ch3_greenroom1 : bool,
-    ///Enter Lightners Live
-    ch3_enter_rhythm : bool,
-    ///Enter Green Room (post-Board 2)
-    ch3_greenroom2 : bool,
-    ///Enter TV World Backstage (post-Doom Board)
-    ch3_escape_doom_board : bool,
-    ///Enter TV World
-    ch3_enter_tv_world : bool,
-    ///Enter 2nd shootout room
-    ch3_2nd_shootout_room : bool,
-    ///Enter Rouxls battle room
-    ch3_enter_rouxls : bool,
-    ///Exit Rouxls battle room
-    ch3_exit_rouxls : bool,
-    ///Obtain Egg
-    ch3_egg : bool,
-    ///Start Tenna battle
-    ch3_enter_tenna : bool,
-    ///Defeat Tenna
-    ch3_beat_tenna : bool,
-    ///Start Knight battle
-    ch3_enter_knight : bool,
-    ///End Knight battle (loss)
-    ch3_knight_death : bool,
-    ///End Knight battle (win)
-    ch3_knight_win : bool,
-    ///Ending
-    ///
-    ///This autosplit does not work if you remove Crickets from the game files (mus\night_ambience.ogg).
-    ch3_ending : bool,
-    ///Ending (OST%)
-    ch3_ending_ost : bool,
-
-    ///All Bosses Splits
-    #[heading_level = 2]
-    ch3_ab_title : Title,
-    ///Obtain Ice Key (room exit)
-    ch3_ice_key : bool,
-    ///Obtain Shelter Key (room exit)
-    ch3_shelter_key : bool,
-    ///Enter Shadow Mantle fight
-    ch3_enter_mantle : bool,
-    ///Defeat Shadow Mantle Enemy
-    ch3_end_mantle : bool,
-    ///Obtain Shadow Mantle (room exit)
-    ch3_exit_mantle : bool,
-
-
-    ///Chapter 4: Prophecy
-    ch4_title : Title,
-    ///Enter Dark Sanctuary (Chair Skip)
-    ch4_chairskip : bool,
-    ///Enter Castle Town
-    ch4_enter_castle_town : bool,
-    ///Start Mike Fight
-    ch4_start_mike : bool,
-    ///End Mike fight
-    ch4_beat_mike : bool,
-    ///Enter Noelle's House
-    ch4_enter_mansion : bool,
-    ///Enter Dark Sanctuary (True Reset)
-    ch4_enter_sanctuary : bool,
-    ///Enter Gerson's Study
-    ch4_enter_study : bool,
-    ///End Jackenstein Fight
-    ch4_jackenstein : bool,
-    ///Exit Grand Piano Room
-    ch4_grand_piano : bool,
-    ///Exit Miss Mizzle fight room
-    ch4_miss_mizzle : bool,
-    ///Seal First Sanctuary
-    ch4_first_sanctuary : bool,
-    ///Fall Below Study
-    ch4_fall_down : bool,
-    ///Obtain Egg
-    ch4_egg : bool,
-    ///End Sound of Justice fight
-    ch4_sound_of_justice : bool,
-    ///Seal Second Sanctuary
-    ch4_second_sanctuary : bool,
-    ///Obtain PrincessRBN
-    ch4_princess_ribbon : bool,
-    ///Start First Titan Climb
-    ch4_start_titan_climb1 : bool,
-    ///End First Titan Climb
-    ch4_end_titan_climb1 : bool,
-    ///Start Second Titan Climb
-    ch4_start_titan_climb2 : bool,
-    ///End Second Titan Climb
-    ch4_end_titan_climb2 : bool,
-    ///Start Titan Fight
-    ch4_start_titan_fight : bool,
-    ///End Titan Fight
-    ch4_end_titan_fight : bool,
-    ///Seal the Titan
-    ch4_seal_titan : bool,
-    ///Seal Third Sanctuary
-    ch4_third_sanctuary : bool,
-    ///Ending (Full Game)
-    ch4_ending : bool,
-    ///Ending (IL)
-    ch4_ending_il : bool,
-    ///Ending (OST%)
-    ch4_ending_ost : bool,
-
-
-    ///All Bosses Splits
-    #[heading_level = 2]
-    ch4_ab_title : Title,
-    ///Solve the Golden Piano puzzle
-    ch4_golden_piano : bool,
-    ///Enter Hammer of Justice battle room
-    ch4_enter_hoj: bool,
-    ///End Hammer of Justice battle
-    ch4_hammer_of_justice : bool,
-    ///Exit Hammer of Justice battle room
-    ch4_exit_axe_room : bool,
-
-
-
-    ///Chapter 5: Festival Day
-    ch5_title : Title,
-    ///Start/reset timer on loading Ch4 completion data?
-    ch5_start_on_prev : Ch5StartOnPrev,
-    ///Bed Skip
-    ch5_bedskip : bool,
-    ///Enter Castle Town
-    ch5_enter_castle_town : bool,
-    ///Enter Flower King Dark World (True Reset)
-    ch5_enter_dw : bool,
-    ///Enter Ideal Diner
-    ch5_enter_diner : bool,
-    ///Exit Ideal Diner
-    ch5_exit_diner : bool,
-    ///Enter dark garden room
-    ch5_dark_garden : bool,
-    ///Enter Aqua battle room
-    ch5_enter_aqua : bool,
-    ///End Aqua battle
-    ch5_aqua_end : bool,
-    ///Exit Aqua battle room
-    ch5_exit_aqua : bool,
-    ///Exit Petal Feather room
-    ch5_exit_feather : bool,
-    ///Enter first Cliffs save point room
-    ch5_enter_cliff1 : bool,
-    ///Exit first Cliffs save point room
-    ch5_enter_cliff2 : bool,
-    ///Enter Pink's shop room
-    ch5_enter_shop_room : bool,
-    ///Exit Pink's shop room
-    ch5_exit_shop_room : bool,
-    ///Obtain Egg
-    ch5_egg : bool,
-    ///Enter Seth & Aqua battle room
-    ch5_enter_seth_aqua : bool,
-    ///End Seth & Aqua battle
-    ch5_beat_seth_aqua : bool,
-    ///Exit Seth & Aqua battle room
-    ch5_exit_seth_aqua : bool,
-    ///Leave Dark World
-    ch5_exit_dw : bool,
-    ///Reenter Dark World
-    ch5_reenter_dw : bool,
-    ///Enter the left side from the foyer
-    ch5_enter_left : bool,
-    ///Enter the foyer from the left side
-    ch5_exit_left : bool,
-    ///Enter the right side from the foyer
-    ch5_enter_right : bool,
-    ///Enter the foyer from the right side
-    ch5_exit_right : bool,
-    ///Climb the foyer beanstalk
-    ch5_beanstalk : bool,
-    ///Enter the ultimate shop room
-    ch5_enter_ultimate_shop : bool,
-    ///Exit the ultimate shop room
-    ch5_exit_ultimate_shop : bool,
-    ///Enter the final save point room
-    ch5_enter_final_save : bool,
-    ///Enter Flowery battle room
-    ch5_exit_final_save : bool,
-    ///Start Flowery battle
-    ch5_start_flowery : bool,
-    ///Susie's Idea
-    ch5_end_flowery : bool,
-    ///End final climb
-    ch5_end_final_climb : bool,
-    ///Omega Flowery Clash
-    ch5_omega_flowery : bool,
-    ///Seal Fountain 1
-    ch5_fountain1 : bool,
-    ///Seal Fountain 2
-    ch5_fountain2 : bool,
-    ///Ending (SRC rules)
-    ch5_ending_src : bool,
-    ///Ending (completion data timing) [NOT IMPLEMENTED YET]
-    ch5_ending_completion_data : bool,
-    ///Complete Side B
-    ch5_sideb : bool,
-
-    ///All Bosses Splits
-    #[heading_level = 2]
-    ch5_ab_title : Title,
-    ///Exit Pink's shop after buying the key
-    ch5_pink_shop : bool,
-    ///Enter the pink door
-    ch5_pink_door : bool,
-    ///Enter Pink battle room
-    ch5_pink_start : bool,
-    ///End Pink battle
-    ch5_pink_end : bool,
-    ///Exit Pink battle room
-    ch5_pink_exit : bool,
-}
 
 const n : &[u64] = &[0];
 
 const ps64: PointerSize = PointerSize::Bit64;
 const ps32: PointerSize = PointerSize::Bit32;
 
-/*fn former_match<T: PartialEq>(state : Pair<T>, val : T) -> bool {
-    state.current == val && state.old != val
-}
-
-fn new_match<T: PartialEq>(state : Pair<T>, val : T) -> bool {
-    state.old == val && state.current != val
-}*/
-
-/*fn room_match(cur_room : ArrayCString<64>, check_room : &str) -> bool {
-    cur_room.validate_utf8().unwrap_or_default().strip_suffix("_ch1").unwrap_or_default() == check_room
-}
-
-fn room_check(room : &Pair<ArrayCString<64>>, dest : &str) -> bool {
-    room_match(room.current,dest) && !room_match(room.old,dest)
-}
-
-fn room_check_both(room : &Pair<ArrayCString<64>>, orig : &str, dest : &str) -> bool {
-    room_match(room.current,dest) && room_match(room.old,orig)
-}*/
-
-
-fn text_match(txt : ArrayCString<128>, en : &str, jp : &str) -> bool {
-    txt.matches(en) || txt.matches(jp)
-}
-
-fn text_open_check(txt : &Pair<ArrayCString<128>>, en : &str, jp : &str) -> bool {
-    //text_match(txt.current,en,jp) && !text_match(txt.old,en,jp)
-    txt.bytes_changed() && text_match(txt.current,en,jp)
-}
-
-fn text_close_check(txt : &Pair<ArrayCString<128>>, en : &str, jp : &str) -> bool {
-    //text_match(txt.old,en,jp) && !text_match(txt.current,en,jp)
-    txt.bytes_changed() && text_match(txt.old,en,jp)
-}
-
-fn text_open_check_multipointer(txts : &Vec<&Pair<ArrayCString<128>>>, en : &str, jp : &str) -> bool {
-    for txt in txts {
-        if text_open_check(txt,en,jp) {
-            return true;
-        }
-    }
-    return false;
-}
-fn text_close_check_multipointer(txts : &Vec<&Pair<ArrayCString<128>>>, en : &str, jp : &str) -> bool {
-    for txt in txts {
-        if text_close_check(txt,en,jp) {
-            return true;
-        }
-    }
-    return false;
-}
-
-fn read_setting(key : &str) -> bool {
-    match Map::load().get(key) {
-        Some(x) => x.get_bool().unwrap_or(false),
-        None => false
-    }
-}
-
-fn start(auto_start : &AutoStart, splits : &mut HashSet<String>) {
-    match auto_start {
-        AutoStart::AutoReset => {
-            splits.clear();
-            timer::reset();
-            timer::start();
-        }
-        AutoStart::AutoStartAndUnpause => {
-            timer::start();
-            timer::resume_game_time();
-        }
-        AutoStart::AutoStart => {
-            //splits.clear();
-            timer::start();
-        }
-        AutoStart::Off => ()
-    }
-}
-
 const IL_Pauses : [&str;5] = ["ch1_ending","ch2_ending_il","ch3_ending","ch4_ending_il","ch5_ending_src"];
-const AC_Pauses : [&str;5] = ["ch1_ending","ch2_ending_ac","ch3_ending","ch4_ending_ac","ch5_ending_src"]; //Ch5 ending in this set will change after Ch6 release
+const AC_Pauses : [&str;5] = ["ch1_ending","ch2_ending_ac","ch3_ending","ch4_ending","ch5_ending_src"]; //Ch5 ending in this set will change after Ch6 release
 const OST_Pauses : [&str;5] = ["ch1_ending_ost","ch2_ending_ac","ch3_ending_ost","ch4_ending_ost","ch5_ending_src"];
 const OST_LateCh2_Pauses : [&str;5] = ["ch1_ending_ost","ch2_ending_ost","ch3_ending","ch4_ending_ost","ch5_ending_src"];
 
-//also does some handling for IGT pausing and unpausing to simplify code elsewhere
-fn split(splits : &mut HashSet<String>, settings : &Settings, name : &str, already_checked : bool) {
-    if settings.ac_pause_timer {
-        if name == "resume_igt" {
-            timer::resume_game_time();
-            return;
-        }
-        //NOTE: Ch5 ending pauses are currently meant for TRACABARTPEEG and assume the category will follow the main rules regarding 5A end timing. After Ch6 releases, the AllChapters mode pause timing for Ch5 will presumably change to completion data
-        if match &settings.chapter_pause_timing {
-            PauseTiming::SingleChapter => IL_Pauses,
-            PauseTiming::AllChapters => AC_Pauses,
-            PauseTiming::OST => OST_Pauses,
-            PauseTiming::OSTLateCh2 => OST_LateCh2_Pauses
-        }.contains(&name) {
-            timer::pause_game_time();
-        }
-    }
-    if !already_checked && (name == "" || splits.contains(name) || !read_setting(name) ) {
-        return;
-    }
-    splits.insert(name.to_string());
-    asr::print_message(format!("Split triggered: {}",name).as_str());
-    timer::split();
-}
 
-struct VarTrack<T: Clone + bytemuck::Pod> {
-    pointer : Option<DeepPointer<16>>,
-    watcher : Watcher<T>,
-}
-impl<T: Clone + bytemuck::Pod> VarTrack<T> {
-    fn disabled() -> VarTrack<T> {
-        VarTrack {
-            watcher: Watcher::<T>::new(),
-            pointer: None,
-        }
-    }
-    fn new(module_base : Address, pointer_size: PointerSize, offsets : &[u64]) -> VarTrack<T> {
-        VarTrack {
-            watcher: Watcher::<T>::new(),
-            pointer: match offsets {
-                &[0] => None,
-                x => Some(DeepPointer::new(module_base, pointer_size, x)),
-            }
-        }
-    }
-    fn update_value(&mut self, process: &Process) -> &Pair<T> {
-        if self.pointer.is_none() {
-            return self.watcher.update_infallible(T::zeroed())
-        }
-        let value = self.pointer.unwrap().deref(&process).unwrap_or_else(|_e| T::zeroed());
-        self.watcher.update_infallible(value)
-    }
-}
 
 async fn main() {
     // TODO: Set up some general state and settings.
     let mut settings = Settings::register();
     let mut splits = HashSet::<String>::new();
+    let item_map = HashMap::from(item_map_init_array());
+    let mut item_tracker = HashSet::<Item>::new();
+    asr::set_tick_rate(60.0);
 
     asr::print_message("Hello, World!");
 
     loop {
+        settings.update();
         let process = Process::wait_attach("DELTARUNE.exe").await;
         let Ok(mut path) = process.get_module_path("DELTARUNE.exe") else {
             next_tick().await;
@@ -630,47 +77,72 @@ async fn main() {
 
         process
             .until_closes(async {
-
+                let attached = Instant::now();
                 let (DELTARUNE, _) = process.wait_module_range("DELTARUNE.exe").await;
                 let module_size = pe::read_size_of_image(&process, DELTARUNE).unwrap_or_default();
                 timer::set_variable("Module Address",format!("{:X}",DELTARUNE.value()).as_str());
 
 
+                let runner_md5 = &format!("{:X}", md5::compute(read(&path).unwrap_or_default()));
+                timer::set_variable("Runner MD5", runner_md5);
+                let version = match runner_md5.to_lowercase().as_str() {
+                    "4d09627e1fa123d12ddf1a496c489f73" => GMS2_v2_2_0,
+                    "dcfb86f7a80d9906bbbafa1b2c224848" => GMS2_2022_1,
+                    "a9db8b7fb6333b5e267f574f46076b3f" => GMS2_2022_2,
+                    "14af94e0435eb4cbe3bb5a03ab4218c4" => GM_LTS2022_0_3_99,
+                    "7bf3cccc2e54481ced3a149e1a083684" => GM_LTS2022_0_3_104,
+                    _ => {
+                        timer::set_variable("Engine Version","Unrecognized");
+                        timer::set_variable("Game Version","invalid or unrecognized");
+                        asr::print_message("Unrecognized GameMaker runner, autosplitter cannot function with this");
+                        loop {next_tick().await;}
+                    },
+                };
+                timer::set_variable("Engine Version", match version {
+                    GMS2_v2_2_0 => "GMS2 v2.2.0 (32-bit)",
+                    GMS2_2022_1 => "GMS2 Monthly 2022.1.0.482 (32-bit)",
+                    GMS2_2022_2 => "GMS2 Monthly 2022.2 (32-bit)",
+                    GM_LTS2022_0_3_99 => "GameMaker LTS 2022.0.3.99 (64-bit)",
+                    GM_LTS2022_0_3_104 => "GameMaker LTS 2022.0.3.104 (64-bit)",
+                });
+
+
                 path = path.replace("DELTARUNE.exe", "data.win");
                 timer::set_variable("Path", path.as_str());
-                let md5 = &format!("{:X}", md5::compute(read(path).unwrap_or_default()));
-                timer::set_variable("MD5", md5);
-                let version = match md5.to_uppercase().as_str() {
-                    "A88A2DB3A68C714CA2B1FF57AC08A032" | //SP-EN vanilla
-                    "047C11435B1C592EC731BFF3B9C5B0CF" | //SP-EN 30tbps
-                    "22008370824A37BAEF8948127963C769" | //SP-JP vanilla
-                    "E05433FE679BC91E3809C1138E3A8EA1" => SP, //SP-JP 30tbps
-                    "616C5751AC9FC584AF250F1B04474AFD" | //demo 1.09 vanilla Itch
-                    "05689183497E58838E99B897F2E0E6AC" | //demo 1.09 30tbps Itch
-                    "267A8ABE468D824222810201F00003BE" | //demo 1.09 vanilla Steam
-                    "272A16964597ED6DC8D2393ED051D3CE" => D109, // demo 1.09 30tbps Steam
-                    "5FBE01F2BC1C04F45D809FFD060AC386" | //demo 1.10 vanilla Itch
-                    "A37C77A4310D2D6A6C2AF18294AAAE7A" | //demo 1.10 30tbps Itch
-                    "CD77A63D7902990DBC704FE32B30700A" | //demo 1.10 vanilla Steam
-                    "758C8862F22F778FDEAFE25FBCD1F4EC" => D110, //demo 1.10 30tbps Steam
-                    "ED4568BAB864166BFD6322CEEB3FB544" | //demo 1.15 vanilla
-                    "6BD6D1381C194C0F456B184CB48D132D" => D115, //demo 1.15 30tbps
-                    "7AD299A8B33FA449E20EDFE0FEDEDDB2" | //demo 1.19 vanilla
-                    "FD0857E6A3AF3AA74E5E00F15AEA5224" => D119, //demo 1.19 30tbps
-                    "B5EF0EEC9554C491777D6C4E93E0DF76" | //v1.02 vanilla
-                    "40A8185886A8A1A2BE996BC57DE3D916" => Ch4_v102, //v1.02 30tbps
-                    "DDEDBBD10FF129B49C64DBEFAA763C6A" | //v244 vanilla
-                    "4A9C69B42E442B673395B3253F292F17" | // v244 30 TBPS mod
-                    "42B66B41B6CEA12FB54219E9D31E5DC8" | // v244 Item tracker mod
-                    "D0420C09A5DEBD6176EA24A1FE1EE3E3" => Ch5_v244, // OST% tracker mod
-                    "908643B7593B000F5B6C61BB484D086A" | //v247 vanilla
-                    "80A63475EF69529B612F9DCA75AF4CC5" | //v247 30tbps
-                    "3217F3BFE82C3E4AA8EE2E9E3A4F4E14" | //v247 Item Tracker
-                    "21CDD09EEADBCC77535AB2BB3412259A" => Ch5_v247, //v247 OST tracker
+                let data_md5 = &format!("{:X}", md5::compute(read(path).unwrap_or_default()));
+                timer::set_variable("data.win MD5", data_md5);
+                
+                let game_version = match data_md5.to_lowercase().as_str() {
+                    "a88a2db3a68c714ca2b1ff57ac08a032" | //SP-EN vanilla
+                    "047c11435b1c592ec731bff3b9c5b0cf" | //SP-EN 30tbps
+                    "22008370824a37baef8948127963c769" | //SP-JP vanilla
+                    "e05433fe679bc91e3809c1138e3a8ea1" => SP, //SP-JP 30tbps
+                    "616c5751ac9fc584af250f1b04474afd" | //demo 1.09 vanilla Itch
+                    "05689183497e58838e99b897f2e0e6ac" | //demo 1.09 30tbps Itch
+                    "267a8abe468d824222810201f00003be" | //demo 1.09 vanilla Steam
+                    "272a16964597ed6dc8d2393ed051d3ce" => D109, // demo 1.09 30tbps Steam
+                    "5fbe01f2bc1c04f45d809ffd060ac386" | //demo 1.10 vanilla Itch
+                    "a37c77a4310d2d6a6c2af18294aaae7a" | //demo 1.10 30tbps Itch
+                    "cd77a63d7902990dbc704fe32b30700a" | //demo 1.10 vanilla Steam
+                    "758c8862f22f778fdeafe25fbcd1f4ec" => D110, //demo 1.10 30tbps Steam
+                    "ed4568bab864166bfd6322ceeb3fb544" | //demo 1.15 vanilla
+                    "6bd6d1381c194c0f456b184cb48d132d" => D115, //demo 1.15 30tbps
+                    "7ad299a8b33fa449e20edfe0fededdb2" | //demo 1.19 vanilla
+                    "fd0857e6a3af3aa74e5e00f15aea5224" => D119, //demo 1.19 30tbps
+                    "b5ef0eec9554c491777d6c4e93e0df76" | //v1.02 vanilla
+                    "40a8185886a8a1a2be996bc57de3d916" => Ch4_v102, //v1.02 30tbps
+                    "ddedbbd10ff129b49c64dbefaa763c6a" | //v244 vanilla
+                    "4a9c69b42e442b673395b3253f292f17" | // v244 30 TBPS mod
+                    "42b66b41b6cea12fb54219e9d31e5dc8" | // v244 Item tracker mod
+                    "d0420c09a5debd6176ea24a1fe1ee3e3" => Ch5_v244, // OST% tracker mod
+                    "908643b7593b000f5b6c61bb484d086a" | //v247 vanilla
+                    "80a63475ef69529b612f9dca75af4cc5" | //v247 30tbps
+                    "3217f3bfe82c3e4aa8ee2e9e3a4f4e14" | //v247 Item Tracker
+                    "21cdd09eeadbcc77535ab2bb3412259a" => Ch5_v247, //v247 OST tracker
                     _ => Invalid,
                 };
-                timer::set_variable("version", match version {
-                    Invalid => "Invalid",
+                timer::set_variable("Game Version", match game_version {
+                    Invalid => "invalid or unrecognized",
                     SP => "SURVEY_PROGRAM",
                     D109 => "Demo v1.09",
                     D110 => "Demo v1.10",
@@ -680,25 +152,47 @@ async fn main() {
                     Ch5_v244 => "Ch1-5, Ch5 v0.0.244",
                     Ch5_v247 => "Ch1-5, Ch5 v0.0.247",
                 });
-
-                if matches!(version,Invalid) { loop { next_tick().await; } }
+                if !settings.allow_unsupported_version && matches!(game_version,Invalid) {
+                    loop {
+                        settings.update();
+                        if settings.allow_unsupported_version { break; }
+                        next_tick().await;
+                    }
+                }
 
                 let ps = match version {
-                    SP | D109 | D110 | D115 => ps32,
+                    GMS2_v2_2_0 | GMS2_2022_1 | GMS2_2022_2 => ps32,
                     _ => ps64
                 };
 
-                let mut chapter = 0;
+                /*let varJump = match ps {
+                    ps64 => 0x10,
+                    ps32 => 0xC, //seems oddly inaccurate? it's as if the jump betweens vars is LARGER on v1.10???? (NOTE: it might just be that there are empty slots for variables)
+                    _ => unreachable!()
+                };*/
+
+                let psBytes = match ps {
+                    ps64 => 0x8,
+                    ps32 => 0x4,
+                    _ => unreachable!()
+                };
+
+                /*let strNumOffset = match ps {
+                    ps64 => -0x18,
+                    ps32 => -0xC,
+                    _ => unreachable!()
+                };*/
+
+                let mut chapter = -1;
 
                 if ps == ps64
-                { //the directory only changes with change_game which starts a whole new process for the autosplitter to attach to, so we only need to read it once per process attached
+                { //working_directory only changes with change_game which starts a whole new process for the autosplitter to attach to, so we only need to read it once per process attached
                     let mut _dir : ArrayCString<256>;
                     loop {
                         _dir = process.read_pointer_path::<ArrayCString<256>>(DELTARUNE, ps, match version {
-                            Invalid|SP|D109|D110|D115 => n,
-                            Ch5_v244 | Ch5_v247 => &[0x8BA818,0],
-                            Ch4_v102 => &[0x8B2818,0],
-                            D119 => &[0x8D06E0,0],
+                            GMS2_v2_2_0 | GMS2_2022_1 | GMS2_2022_2 => unreachable!(), //we shouldn't be at this part of the code with those versions
+                            GM_LTS2022_0_3_99 => &[0x8B2818,0],
+                            GM_LTS2022_0_3_104 => &[0x8BA818,0],
                         }).unwrap_or_default();
                         if _dir != ArrayCString::<256>::default() {
                             break;
@@ -712,6 +206,9 @@ async fn main() {
                     else if dir.ends_with(r"chapter3_windows\") { chapter = 3 }
                     else if dir.ends_with(r"chapter4_windows\") { chapter = 4 }
                     else if dir.ends_with(r"chapter5_windows\") { chapter = 5 }
+                    else { chapter = 0 }
+                } else if matches!(version,GMS2_v2_2_0) {
+                    chapter = 1;
                 }
                 timer::set_variable_int("Chapter",chapter);
 
@@ -754,428 +251,241 @@ async fn main() {
                 let mut room_watch = Watcher::<i32>::new();
                 let mut room_name_watch = Watcher::<ArrayCString<64>>::new();
 
+                //temporary unreachables for pointers I haven't found yet
+                let stringsListOffset = match version {
+                    GMS2_v2_2_0 => 0x3EAE58,
+                    GMS2_2022_1 => 0x43EA88,
+                    GMS2_2022_2 => 0x440AA8,
+                    GM_LTS2022_0_3_99 => 0x5F4CF8,
+                    GM_LTS2022_0_3_104 => 0x5FCD08,
+                };
+
+                //let stringsListTiming = Instant::now();
+                let mut stringsList = HashMap::<u32,String>::new();
+                retry(|| -> Option<bool> {
+                    let Ok(sListPtr) = process.read_pointer(DELTARUNE.add(stringsListOffset),ps) else { return None; };
+                    //the number of strings is always found at -0xC from the main array pointer regardless of 32-bit/64-bit
+                    let Ok(strNum) = process.read::<u32>(DELTARUNE.add(stringsListOffset - 0xC)) else { return None; }; 
+                    asr::print_message(format!("StringsList length: {}",strNum).as_str());
+                    for i in 0..strNum {
+                        let Ok(namePtr) = process.read_pointer(sListPtr.add(psBytes*i as u64), ps) else {
+                            continue;
+                        };
+                        if namePtr.is_null() {  continue; }
+                        let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();
+                        let name = _name.validate_utf8().unwrap_or_default();
+                        if name != "" {
+                            stringsList.insert(i + match version {GMS2_v2_2_0=>0,_=>100000}, name.to_string());
+
+                            /*if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
+                                asr::print_limited::<64>(&format_args!("{} found at StringID {}",name,i))
+                            }
+                            timer::set_variable_int("last real string index",i);*/
+                        }
+                    }
+                    //in SP, the pointers to names of global variables are in a separate array from the ones for other objects' variables, but there is no overlap so we can just read both into one HashMap
+                    if matches!(version,GMS2_v2_2_0) {
+                        let Ok(sListPtr2) = process.read_pointer(DELTARUNE.add(stringsListOffset-0x10),ps) else { return None; };
+                        //let strNum = process.read::<u32>(sListPtr.add_signed(strNumOffset)).unwrap_or_default(); //there doesn't seem to be a real length value anywhere around here
+                        //asr::print_message(format!("StringsList length: {}",strNum).as_str());
+                        for i in 0..strNum {
+                            let Ok(namePtr) = process.read_pointer(sListPtr2.add(psBytes*i as u64), ps) else {
+                                continue;
+                            };
+                            if namePtr.is_null() {  continue; }
+                            let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();
+                            let name = _name.validate_utf8().unwrap_or_default();
+                            if name != "" {
+                                /*stringsList.insert(i, name.to_string());
+                                if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
+                                    asr::print_limited::<64>(&format_args!("{} found at StringID {}",name,i))
+                                }
+                                timer::set_variable_int("last real string index",i);*/
+                            }
+                        }
+                    }
+                    if (stringsList.len() as u32) < (strNum * 3 / 4) { return None; }
+                    return Some(true);
+                }).await;
+                //asr::print_message(format!("StringsList read in {} seconds",stringsListTiming.elapsed().as_secs_f64()).as_str());
+                asr::print_message(format!("Number of strings: {}",stringsList.len()).as_str());
+                //asr::print_message(format!("plot's String index is {}",string_ids["plot"]).as_str());s
+
+                //temporary unreachables for pointers I haven't found yet
+                let objArrOffset = match version {
+                    GMS2_v2_2_0 => 0x49A5C8,
+                    GMS2_2022_1 => 0x4DCCEC,
+                    GMS2_2022_2 => 0x4DE60C,
+                    GM_LTS2022_0_3_99 => 0x69FA98,
+                    GM_LTS2022_0_3_104 => 0x6A7A98,
+                };
+
+                let objPropOff = match ps {
+                    ps64 => 0x18,
+                    ps32 => 0xC,
+                    _ => unreachable!()
+                };
+
+                let objNumOff = match ps {
+                    ps64 => 0xC,
+                    ps32 => 0x8,
+                    _ => unreachable!()
+                };
+
+                let mut obj_addr_map = HashMap::<String,Address>::new();
+                retry(|| -> Option<bool> {
+                    //for testing we temporarily skip object reading in versions that don't have offsets found yet
+                    let Ok(objArrBase) = process.read_pointer(DELTARUNE.add(objArrOffset),ps) else { return None; };
+                    let Ok(objNum) = process.read::<u32>(objArrBase.add(objNumOff)) else {
+                        return None;
+                    };
+                    if objNum == 0 { return None; }
+                    asr::print_message(format!("Number of objects: {}",objNum).as_str());
+                    let Ok(arr) = process.read_pointer(objArrBase,ps) else { return None; };
+                    for i in 0..1024u64 { //might be higher in SP? Seems to go up to 2820. However there are only 342 objects in SP so I doubt it'd matter
+                        let Ok(mut objAddr) = process.read_pointer(arr.add(psBytes as u64*i),ps) else { return None; };
+                        for _layer in 1..=10 {
+                            if objAddr.is_null() { break; }
+                            let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[objPropOff,match version { GMS2_v2_2_0 => 0x14, _ => 0 },0x0]).unwrap_or_default();
+                            let name = _name.validate_utf8().unwrap_or_default();
+                            if name != "" {
+                                /*if matches!(name,"obj_writer"|"obj_moneydisplay"|"DEVICE_NAMER"|"obj_berdly_smoke") {
+                                    asr::print_message(format!("{} found at index {} layer {}, address {}",name,i,_layer,objAddr).as_str());
+                                }*/
+                                obj_addr_map.insert(name.to_string(),objAddr);
+                            }
+                            objAddr = process.read_pointer(objAddr,ps).unwrap_or_default();
+                        }
+                    }
+                    //if a significant amount of objects were missed
+                    if (obj_addr_map.len() as u32) < (objNum * 3 / 4) { obj_addr_map.clear(); return None; }
+                    return Some(true);
+                }).await;
+                asr::print_message(format!("objs successfully found: {}",obj_addr_map.len()).as_str());
+
+                
+                let mantleOutro_instCount = match chapter {
+                    3 => Address::from(process.read_pointer_path::<u64>(get_obj(&obj_addr_map,"obj_shadow_mantle_enemy_outro"),ps,&[0x18,0x78]).unwrap_or_default()),
+                    _ => Address::NULL
+                };
+                let crtEnd_instCount = match chapter {
+                    5 => Address::from(process.read_pointer_path::<u64>(get_obj(&obj_addr_map,"obj_LW20W_end"),ps,&[0x18,0x78]).unwrap_or_default()),
+                    _ => Address::NULL
+                };
+                /*let mut objs = String::from("");
+                for k in obj_addr_map.keys() {
+                    objs += k.as_str();
+                    objs += ", ";
+                }
+                asr::print_message(&objs);*/
+
+
+                
+                /*let globalOffset : u64 = match version {
+                    GMS2_v2_2_0 => 0x49C3E0, //0x48E5DC,
+                    GMS2_2022_1 => 0x6FCF38,
+                    GMS2_2022_2 => 0x6FE860,
+                    GM_LTS2022_0_3_99 => 0x6A1CA8,
+                    GM_LTS2022_0_3_104 => 0x6A9CA8,
+                };*/
+
+                let mut global = retry(|| global_setup(&process, DELTARUNE, version, ps)).await;
+                asr::print_message(&format!("Found global, array starts at {}",global.finder.arrAddr));
+
+
+
+                //simple constant-address watchers
+                let mut _plot = Watcher::<f64>::new();
+                let mut _choice = Watcher::<f64>::new();
+                let mut _msc = Watcher::<f64>::new();
+                let mut _fighting = Watcher::<f64>::new();
+                let mut _chapter = Watcher::<f64>::new();
+                let mut _darkzone = Watcher::<f64>::new();
+
+
+                //watchers for object instance variables, strings, values in arrays, etc.
+                //the same watcher may be used for different variables depending on the chapter and room
+                let mut _namer = Watcher::<f64>::new();
+                let mut _con = Watcher::<f64>::new();
+                //let mut _posX = Watcher::<f32>::new();
+                //let mut _posY = Watcher::<f32>::new();
+                let mut _text_check = Watcher::<bool>::new();
+                let mut _text_check2 = Watcher::<bool>::new();
+                let mut _flag = Watcher::<f64>::new();
+                let mut _instExist = Watcher::<bool>::new();
+                //let mut _instBool = Watcher::<bool>::new();
+
+
                 // sound stuff (pointer only varies by runner version)
 
-                let mut snd_ptr = VarTrack::<ArrayCString<256>>::new(DELTARUNE,ps,match version {
-                    Invalid | SP => n,
-                    D109|D110 => &[0x4E0794, 0x58, 0xC0,  0x40, 0x0],
-                    D115 => &[0x4E20B4, 0x58, 0xC0,  0x40, 0x0],
-                    D119 | Ch4_v102 => &[0x6A3818, 0x60, 0xD0, 0x58, 0x0],
-                    Ch5_v244 | Ch5_v247 => &[0x6AB818, 0x60, 0xD0, 0x58, 0x0],
+                let mut snd_ptr = PathTrack::<ArrayCString<256>>::new(DELTARUNE, ps, match version {
+                    GMS2_v2_2_0 => n,
+                    GMS2_2022_1 => &[0x4E0794, 0x58, 0xC0,  0x40, 0x0],
+                    GMS2_2022_2 => &[0x4E20B4, 0x58, 0xC0,  0x40, 0x0],
+                    GM_LTS2022_0_3_99 => &[0x6A3818, 0x60, 0xD0, 0x58, 0x0],
+                    GM_LTS2022_0_3_104 => &[0x6AB818, 0x60, 0xD0, 0x58, 0x0],
                 });
 
-                let mut mus_ptr = VarTrack::<ArrayCString<256>>::new(DELTARUNE,ps,match version {
-                    Invalid | SP => n,
-                    D109|D110 => &[0x4DFF58, 0x0,  0x44,  0x0],
-                    D115 => &[0x4E1878, 0x0,  0x0,   0x0],
-                    D119 | Ch4_v102 => &[0x6A2F90, 0x0,  0x0,  0x0],
-                    Ch5_v244 | Ch5_v247 => &[0x6AAF90, 0x0,  0x0,  0x0],
+                let mut mus_ptr = PathTrack::<ArrayCString<256>>::new(DELTARUNE, ps, match version {
+                    GMS2_v2_2_0 => n,
+                    GMS2_2022_1 => &[0x4DFF58, 0x0,  0x44,  0x0],
+                    GMS2_2022_2 => &[0x4E1878, 0x0,  0x0,   0x0],
+                    GM_LTS2022_0_3_99 => &[0x6A2F90, 0x0,  0x0,  0x0],
+                    GM_LTS2022_0_3_104 => &[0x6AAF90, 0x0,  0x0,  0x0],
                 });
 
+                //const items_goal : usize = 160;
 
-                //DEVICE_NAMER.EVENT
+                //some helpful closures
+                let chapter1ify = |name : &str| match version {
+                    GMS2_2022_1 | GMS2_2022_2 => name.to_owned() + "_ch1",
+                    _ => name.to_owned()
+                };
 
-                let mut namer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid|SP => n,
-                    D109 => &[0x6EF220, 0xD4, 0x5C,  0x20, 0x24,  0x10, 0x9C,  0x0],
-                    D110 => &[0x6EF220, 0xD4, 0x5C,  0x20, 0x24,  0x10, 0x2F4, 0x0],
-                    D115 => &[0x6F0B48, 0xD4, 0x5C,  0x20, 0x24, 0x10, 0xFC,  0x0],
-                    D119 => &[0x8B2790, 0x178, 0x70,  0x38, 0x48,  0x10, 0x3B0, 0x0],
-                    Ch4_v102 => match chapter {
-                        2 | 3 => &[0x8B2790, 0x178, 0x70, 0x38, 0x48, 0x10, 0x60, 0x0],
-                        4 => &[0x8B2790, 0x178, 0x70, 0x38, 0x48, 0x10, 0x280, 0x0],
-                        _ => n
+                let objVar = |obj : &str, var : &str| get_obj_var(&process, version, &obj_addr_map, &stringsList, obj, var);
+
+                let arrItem = | arr : Address, index : u64 | process.read::<f64>(arr.add(index*0x10)).unwrap_or_default();
+                
+                let arrCheck = | arr, val, indexStart, indexEnd | -> bool {
+                    for i in indexStart..=indexEnd {
+                        if arrItem(arr,i) == val {
+                            return true;
+                        }
                     }
-                    Ch5_v244 => match chapter {
-                        2 => &[0x8BA790, 0x178, 0x70,  0x38,   0x48,  0x10,  0x90,  0x0],
-                        3 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48, 0x10, 0x120, 0x0],
-                        4 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48,  0x10,  0x40,  0x0],
-                        5 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48, 0x10, 0x170, 0x0],
-                        _ => n
-                    }
-                    Ch5_v247 => match chapter {
-                        2 => &[0x8BA790, 0x178, 0x70,  0x38,   0x48,  0x10,  0x90,  0x0],
-                        3 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48, 0x10, 0x120, 0x0],
-                        4 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48,  0x10,  0x40,  0x0],
-                        5 => &[0x8BA790, 0x178, 0x70,   0x38,   0x48, 0x10, 0x220, 0x0],
-                        _ => n
-                    }
-                });
+                    false
+                };
 
-                //Global variables
-                //(note: for global.flag[N] values, the last offset is the only difference between different flags' locations, and is equal to 16x the flag's index number - which you can get either by directly multiplying by 16 and putting it in as a decimal number, or by converting to hex then adding a trailing zero.)
-
-                let mut old_chapter_ptr = VarTrack::<f64>::new(DELTARUNE,ps, match version {
-                    D109 | D110 => &[0x6FCF38, 0x30, 0x24D8, 0x0],
-                    D115 => &[0x6FE860, 0x30, 0x2F34, 0x80],
-                    _ => n
-                });
-
-                let mut filechoice_ptr = VarTrack::<f64>::new(DELTARUNE,ps, match version {
-                    SP => &[0x48E5DC, 0x27C, 0x488, 0x4D0],
-                    _ => n
-                });
-
-                //DOESN'T WORK FOR CHAPTER 1?
-                let mut fighting_ptr = VarTrack::<f64>::new(DELTARUNE,ps, match version {
-                    Invalid|SP => n,
-                    D109 | D110 => &[0x6FCF38, 0x30, 0x4F8,  0x0],
-                    D115 => &[0x6FE860, 0x30, 0xA758, 0x0],
-                    D119 => match chapter {
-                        1 => n, //&[0x6A1CA8, 0x48, 0x10, 0x32F0, 0x710], (doesn't work points to some tiny value)
-                        2 => &[0x6A1CA8, 0x48, 0x10, 0x7790, 0xBB0],
-                        _ => n
-                    }
-                    Ch4_v102 => match chapter {
-                        1 => n, //&[0x6A1CA8, 0x48, 0x10,  0x1E40, 0x720], (other LTS fight_ch1 pointers don't work so I assume this one doesn't either
-                        2 => &[0x6A1CA8, 0x48,  0x10,  0x100,  0x0],
-                        3 => &[0x6A1CA8, 0x48,  0x10,   0x1190, 0x370],
-                        4 => &[0x6A1CA8, 0x48,  0x10,   0x72B0, 0x370],
-                        _ => n
-                    }
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        1 => n, //&[0x6A9CA8, 0x48, 0x10,  0x1E40, 0x740], (points to Dark Dollars instead)
-                        2 => &[0x6A9CA8, 0x48,  0x10,  0x100,  0x0],
-                        3 => &[0x6A9CA8, 0x48,  0x10,   0x1190, 0x370],
-                        4 => &[0x6A9CA8, 0x48,  0x10,   0x72B0, 0x370],
-                        5 => &[0x6A9CA8, 0x48,  0x10,   0x820,  0x70],
-                        _ => n
-                    }
-                });
-
-                let mut plot_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid|D109|D110|D115|D119 => n,
-                    SP => &[0x48E5DC, 0x27C, 0x488, 0x500],
-                    Ch4_v102 => match chapter {
-                        3 => &[0x6A1CA8, 0x48,  0x10,   0x1000, 0x250],
-                        4 => &[0x6A1CA8, 0x48,  0x10,   0x2F40, 0x30],
-                        _ => n
-                    },
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        3 => &[0x6A9CA8, 0x48,  0x10,   0x1000, 0x250],
-                        4 => &[0x6A9CA8, 0x48,  0x10,   0x2F70, 0x30],
-                        _ => n
-                    },
-                });
-
-                let mut choicer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid=>n,
-                    SP => &[0x48E5DC, 0x27C, 0x28,  0x40],
-                    D109 | D110 => &[0x6FCF38, 0x30, 0x18C0, 0x0],
-                    D115 => &[0x6FE860, 0x30, 0xBA0,  0xC0],
-                    D119 => match chapter {
-                        1 => &[0x6A1CA8, 0x48, 0x10, 0x32F0, 0x0],
-                        2 => &[0x6A1CA8, 0x48, 0x10, 0x7790, 0x0],
-                        _ => n
-                    }
-                    Ch4_v102 => match chapter {
-                        1 => &[0x6A1CA8, 0x48, 0x10,  0x1E40, 0x10],
-                        2 => &[0x6A1CA8, 0x48,  0x10,  0x7870, 0x0],
-                        _ => n
-                    }
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        1 => &[0x6A9CA8, 0x48, 0x10,  0x1E40, 0x10],
-                        2 => &[0x6A9CA8, 0x48,  0x10,  0x7870, 0x0],
-                        5 => &[0x6A9CA8, 0x48,  0x10,   0x150,  0x20],
-                        _ => n
-                    }
-                });
-
-                let mut msc_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid=>n,
-                    SP => &[0x48E5DC, 0x27C, 0x28,  0x140],
-                    D109 | D110 => &[0x6FCF38, 0x30, 0x354C, 0x0],
-                    D115 => &[0x6FE860, 0x30, 0x17AC, 0x0],
-                    D119 => match chapter {
-                        1 => &[0x6A1CA8, 0x48, 0x10, 0x32F0, 0xF0],
-                        2 => &[0x6A1CA8, 0x48, 0x10, 0x7790, 0x130],
-                        _ => n
-                    }
-                    Ch4_v102 => match chapter {
-                        1 => &[0x6A1CA8, 0x48, 0x10,  0x1E40, 0x100],
-                        2 => &[0x6A1CA8, 0x48,  0x10,  0x7310, 0x0],
-                        _ => n
-                    }
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        1 => &[0x6A9CA8, 0x48, 0x10,  0x1E40, 0x100],
-                        2 => &[0x6A9CA8, 0x48,  0x10,  0x7310, 0x0],
-                        _ => n
-                    }
-                });
-
-                //globals with chapter-specific relevance (e.g. flags)
-
-                let mut knight_result_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
-                    3 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
-                        Ch4_v102 => &[0x6A1CA8, 0x48,  0x10,   0x6A70, 0x0,  0x90, 0x4170],
-                        Ch5_v244 | Ch5_v247 => &[0x6A9CA8, 0x48,  0x10,   0x6A70, 0x0,  0x90, 0x4170],
-                    }
-                    _ => n
-                });
-
-                let mut pink_coins_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
-                    5 => match version {
-                        Invalid|SP|D109|D110|D115|D119|Ch4_v102 => n,
-                        Ch5_v244 => &[0x6A9CA8, 0x48,  0x10,   0x6BB0, 0x0,  0x90, 0x5200],
-                        Ch5_v247 => &[0x6A9CA8, 0x48,  0x10,   0x6BA0, 0x0,  0x90, 0x5200],
-                    }
-                    _ => n
-                });
+                let textCheck = |en,jp| check_text(&process,version,&stringsList,get_obj(&obj_addr_map,"obj_writer"),en,jp);
 
 
+                let mut global_effectiveness_retry_timer: i32 = 5;
 
 
-                //recurring objects across chapters
-
-                let mut text_ptr1 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match version {
-                    Invalid|SP => n,
-                    D109 | D110 => &[0x6FCE4C, 0x8,  0x144, 0x24, 0x10, 0x5A0, 0x0, 0x0, 0x0],
-                    D115 => &[0x6FE774, 0x8,  0x144, 0x24, 0x10, 0x0, 0x0, 0x0, 0x0],
-                    D119 => match chapter {
-                        1 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0xF0, 0x0, 0x0, 0x0],
-                        2 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x5F0, 0x0, 0x0, 0x0],
-                        _ => n
-                    }
-                    Ch4_v102 => match chapter {
-                        1 => &[0x8C2008, 0x10, 0x1A0, 0x48,   0x10,  0x390, 0x0, 0x0, 0x0],
-                        2 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x6F0, 0x0,   0x0,  0x0],
-                        4 => &[0x8C2008, 0x10,  0x1A0,  0x48,   0x10,  0x300, 0x0,   0x0, 0x0],
-                        _ => n
-                    }
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        1 => &[0x8CE220, 0x10, 0x1A0, 0x48,   0x10,  0x390, 0x0, 0x0, 0x0],
-                        2 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x6F0, 0x0,   0x0,  0x0],
-                        4 => &[0x8CE220, 0x10,  0x1A0,  0x48,   0x10,  0x310, 0x0,   0x0,  0x0],
-                        _ => n
-                    }
-                });
-
-                let mut text_ptr2 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
-                    2 => match version {
-                        Invalid|SP|D109|D110|D115 => n,
-                        D119 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x6D0, 0x0, 0x0, 0x0],
-                        Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x700, 0x0,   0x0,  0x0],
-                        Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x700, 0x0,   0x0,  0x0],
-                    }
-                    _ => n
-                });
-                let mut text_ptr3 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
-                    2 => match version {
-                        Invalid|SP|D109|D110|D115 => n,
-                        D119 => &[0x8C2008, 0x10, 0x1A0, 0x48, 0x10, 0x6F0, 0x0, 0x0, 0x0],
-                        Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x710, 0x0,   0x0,  0x0],
-                        Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x710, 0x0,   0x0,  0x0],
-                    }
-                    _ => n
-                });
-                let mut text_ptr4 = VarTrack::<ArrayCString<128>>::new(DELTARUNE,ps,match chapter {
-                    2 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
-                        Ch4_v102 => &[0x8C2008, 0x10,  0x1A0, 0x48,   0x10,  0x7E0, 0x0,   0x0,  0x0],
-                        Ch5_v244 | Ch5_v247 => &[0x8CE220, 0x10,  0x1A0, 0x48,   0x10,  0x7E0, 0x0,   0x0,  0x0],
-                    }
-                    _ => n
-                });
-
-
-                let mut susie_sprite_ptr = VarTrack::<i32>::new(DELTARUNE,ps,match chapter {
-                    4 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
-                        Ch4_v102 => &[0x69FA98, 0x0,   0x1008, 0x50,   0x158, 0x10,  0xBC],
-                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1018, 0x50,   0x158, 0x10,  0xBC],
-                    }
-                    _ => n
-                });
-
-                let mut player_x_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
-                    4 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
-                        Ch4_v102 => &[0x69FA98, 0x0,   0x198,  0x0,    0x50,  0x158, 0x10,  0xE8],
-                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1A8,  0x0,    0x50,  0x158, 0x10,  0xE8],
-                    }
-                    _ => n
-                });
-
-                let mut player_y_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
-                    4 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
-                        Ch4_v102 => &[0x69FA98, 0x0,   0x198,  0x0,    0x50,  0x158, 0x10,  0xEC],
-                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1A8,  0x0,    0x50,  0x158, 0x10,  0xEC],
-                    }
-                    _ => n
-                });
-
-
-
-                //Ch1 objects
-
-                let mut great_door_con_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid => n,
-                    SP => &[0x48BDEC, 0xC,  0x60, 0x10, 0x10,  0x0],
-                    D109 | D110 => &[0x6EF220, 0x84, 0x24,  0x10, 0x18,  0x0],
-                    D115 => &[0x6F0B48, 0x84, 0x24,  0x10, 0x18, 0x0],
-                    D119 => match chapter {
-                        1 => &[0x8B2790, 0xE0,  0x48,  0x10, 0x0,   0x0],
-                        _ => n
-                    }
-                    Ch4_v102 => match chapter {
-                        1 => &[0x8B2790, 0xE0, 0x48,  0x10,   0x30,  0x0],
-                        _ => n
-                    }
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        1 => &[0x8BA790, 0xE0, 0x48,  0x10,   0x30,  0x0],
-                        _ => n
-                    }
-                });
-
-                let mut king_pos_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match version {
-                    Invalid => n,
-                    SP => &[0x6AEB80, 0x4, 0x178, 0x80, 0xC8, 0x8, 0xB4],
-                    D109 | D110 => &[0x6F1394, 0x4, 0x140, 0x68, 0x3C, 0x8, 0xB0],
-                    D115 => &[0x6F2CBC, 0x4, 0x140, 0x68, 0x3C, 0x8, 0xB0],
-                    D119 => match chapter {
-                        1 => &[0x69FA98, 0x0, 0x530, 0x50, 0x158, 0x10, 0xE8],
-                        _ => n
-                    }
-                    Ch4_v102 => match chapter {
-                        1 => &[0x69FA98, 0x0,  0x560, 0x50,   0x158, 0x10,  0xE8],
-                        _ => n
-                    }
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        1 => &[0x6A7A98, 0x0,  0x560, 0x50,   0x158, 0x10,  0xE8],
-                        _ => n
-                    }
-                });
-
-
-
-                //SP-specific object checks
-
-                let mut jevil_dance_ptr1 = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    SP => &[0x48BDEC, 0x78, 0x60, 0x10, 0x10,  0x0],
-                    _ => n
-                });
-                let mut jevil_dance_ptr2 = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    SP => &[0x48BDEC, 0x7C, 0x60, 0x10, 0x10,  0x0],
-                    _ => n
-                });
-                let mut final_textbox_ptr1 = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    SP => &[0x48BDEC, 0x98, 0x60, 0x10, 0x274, 0x0],
-                    _ => n
-                });
-                let mut final_textbox_ptr2 = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    SP => &[0x48BDEC, 0x9C, 0x60, 0x10, 0x274, 0x0],
-                    _ => n
-                });
-
-
-
-                //Ch2 objects
-
-                let mut loaded_disk_bg_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid|SP => n,
-                    D109 => &[0x6EF220, 0x84, 0x24,  0x10, 0x3D8, 0x0],
-                    D110 => &[0x6EF220, 0x84, 0x24,  0x10, 0x87C, 0x0],
-                    D115 => &[0x6F0B48, 0x84, 0x24,  0x10, 0x0,  0x0],
-                    D119 => match chapter {
-                        2 => &[0x8B2790, 0xE0,  0x48,  0x10, 0x3C0, 0x0],
-                        _ => n
-                    }
-                    Ch4_v102 => match chapter {
-                        2 => &[0x8B2790, 0xE0,  0x48,  0x10,   0xC70, 0x0],
-                        _ => n
-                    }
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        2 => &[0x8BA790, 0xE0,  0x48,  0x10,   0xCA0, 0x0],
-                        _ => n
-                    }
-                });
-
-                let mut snowgrave_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match version {
-                    Invalid|SP => n,
-                    D109 | D110 => &[0x6EF220, 0xF4, 0x27C, 0x6C, 0x5C,  0x20, 0x144, 0x24, 0x10, 0xC0, 0x0],
-                    D115 => &[0x6F0B48, 0xF4, 0x27C, 0x6C, 0x5C, 0x20, 0x144, 0x24, 0x10, 0x120, 0x0],
-                    D119 => match chapter {
-                        2 => &[0x8B2790, 0x1A0, 0x3B0, 0x88, 0x70,  0x38, 0x1A0, 0x48, 0x10, 0x3D0, 0x0],
-                        _ => n
-                    }
-                    Ch4_v102 => match chapter {
-                        2 => &[0x8B2790, 0x1A0, 0x3B0, 0x88,   0x70,  0x38,  0x1A0, 0x48, 0x10, 0xA0, 0x0],
-                        _ => n
-                    }
-                    Ch5_v244 | Ch5_v247 => match chapter {
-                        2 => &[0x8BA790, 0x1A0, 0x3B0, 0x88,   0x70,  0x38,  0x1A0, 0x48, 0x10, 0x80, 0x0],
-                        _ => n
-                    }
-                });
-
-
-
-
-
-                //Ch3 objects
-
-                let mut egg_timer_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
-                    3 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
-                        Ch4_v102 => &[0x8B2790, 0x1E8, 0x530,  0x38,   0x48, 0x10, 0x290, 0x0],
-                        Ch5_v244 | Ch5_v247 => &[0x8BA790, 0x1E8, 0x40,   0x38,   0x48, 0x10, 0x330, 0x0],
-                    }
-                    _ => n
-                });
-                let mut mantle_outro_ptr = VarTrack::<f32>::new(DELTARUNE,ps,match chapter {
-                    3 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
-                        Ch4_v102 => &[0x69FA98, 0x0,   0x19B0, 0x18,   0x50, 0x10, 0xD0],
-                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x19B0, 0x18,   0x50, 0x10, 0xD0],
-                    }
-                    _ => n
-                });
-
-
-
-                //Ch4 objects
-
-                let mut mike_action_ptr = VarTrack::<f64>::new(DELTARUNE,ps,match chapter {
-                    4 => match version {
-                        Invalid|SP|D109|D110|D115|D119 => n,
-                        Ch4_v102 => &[0x8B2790, 0x1A0, 0x2F0,  0x90,   0x78,  0x38,  0x198, 0x48, 0x10, 0x140, 0x0],
-                        Ch5_v244 | Ch5_v247 => &[],
-                    }
-                    _ => n
-                });
-
-
-                //Ch5 objects
-
-                let mut crt_start_ptr = VarTrack::<i32>::new(DELTARUNE,ps,match chapter {
-                    5 => match version {
-                        Invalid|SP|D109|D110|D115|D119|Ch4_v102 => n,
-                        Ch5_v244 | Ch5_v247 => &[0x6A7A98, 0x0,   0x1910, 0x8,    0x18, 0x68, 0x10,  0xE4],
-                    }
-                    _ => n
-                });
-
-                let mut tempVar = 0;
-                let mut SPEndingTriggered = false;
-                let mut ost_end_active = false;
-                let mut ost_end_started = Instant::now();
-
-                let mut bagel_door = false;
-
-
-
-
-
-
-
+                asr::print_message(format!("ready for continuous logic after {} seconds",attached.elapsed().as_secs_f64()).as_str());
                 // TODO: Load some initial information from the process.
                 loop {
+                    if !process.is_open() { break; }
                     settings.update();
+                    if !settings.allow_unsupported_version && matches!(game_version,Invalid) {
+                        next_tick().await;
+                        continue;
+                    }
 
-                    if matches!(version,D109|D110|D115) {
-                        chapter = old_chapter_ptr.update_value(&process).current as i32;
+                    if chapter != 0 && global.cache.is_empty() {
+                        global_effectiveness_retry_timer -= 1;
+                        if global_effectiveness_retry_timer <= 0 {
+                            global_effectiveness_retry_timer = 5;
+                            global = retry(|| global_setup(&process, DELTARUNE, version, ps)).await;
+                        }
+                    }
+
+
+                    /*if chapter > 2 && flag0Ptr.is_null() {
+                        flag0Ptr = get_array_element0(&process,ps,&global_ptr(&process,&stringsList,&globalFinder,&mut globalPtrs,"flag"));
+                    }*/
+
+                    if matches!(version,GMS2_2022_1|GMS2_2022_2) {
+                        chapter = _chapter.update_infallible(global.num(&process,&stringsList,"chapter")).current as i32;
                     }
                     timer::set_variable_int("Chapter",chapter);
 
@@ -1195,111 +505,164 @@ async fn main() {
                     //asr::timer::set_variable("Room Name Address",format!("{:X}",room_name_addr.value()).as_str());
                     timer::set_variable("Room Name",cur_room);
 
+                    timer::set_variable("text",get_obj_str::<128>(&process, version, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default()); //
+                    timer::set_variable("writer addr",format!("{}",obj_addr_map.get(&"obj_writer".to_owned()).unwrap_or(&Address::NULL)).as_str());
+
+                    //timer::set_variable_float("Plot",globalFinder.readNum::<f64>(&process, &stringsList, "plot"));
+
+
                     let state = timer::state();
 
                     if state == TimerState::NotRunning || state == TimerState::Ended {
-                        tempVar = 0;
-                        SPEndingTriggered = false;
-                        ost_end_active = false;
+                        //tempVar = 0;
                         if !splits.is_empty() { splits.clear(); }
+                        if !item_tracker.is_empty() { item_tracker.clear(); }
                     }
 
                     match chapter {
                         //logic for autostart, autoreset, and continuing game time
                         0 => (),
                         1 => {
-                            if room.changed() && cur_room == "PLACE_CONTACT" {
-                                SPEndingTriggered = false;
-                                tempVar = 0;
-                                ost_end_active = false;
-                                start(&settings.auto_start,&mut splits);
+                            if prev_room != cur_room && cur_room == "PLACE_CONTACT" {
+                                //tempVar = 0;
+                                start(&settings.auto_start,&mut splits,&mut item_tracker);
                             }
                         }
-                        5 => {
-                            let namer_event = namer_ptr.update_value(&process);
+                        5 if prev_room == "PLACE_CONTACT" => {
+                            let namer_event = _namer.update_infallible(objVar("DEVICE_NAMER","EVENT")); //get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT")
                             timer::set_variable_float("Namer Event",namer_event.current);
                             if !matches!(settings.ch5_start_on_prev,Ch5StartOnPrev::Exclusively) {
                                 if cur_room == "PLACE_MENU"
                                 {
                                     if namer_event.current == 75.0 && namer_event.old == 74.0 {
-                                        tempVar = 0;
-                                        ost_end_active = false;
-                                        start(&settings.auto_start,&mut splits);
+                                        start(&settings.auto_start,&mut splits,&mut item_tracker);
                                     }
                                 }
                             }
                             if !matches!(settings.ch5_start_on_prev,Ch5StartOnPrev::No) {
                                 if prev_room == "PLACE_MENU" && cur_room == "room_krisroom" && namer_event.old != 75.0 {
-                                    tempVar = 0;
-                                    ost_end_active = false;
-                                    start(&settings.auto_start,&mut splits);
+                                    start(&settings.auto_start,&mut splits,&mut item_tracker);
                                 }
                             }
                         }
-                        _ => {
-                            if cur_room == "PLACE_MENU"
-                            {
-                                let namer_event = namer_ptr.update_value(&process);
-                                timer::set_variable_float("Namer Event",namer_event.current);
-                                if namer_event.current == 75.0 && namer_event.old != 75.0 {
-                                    tempVar = 0;
-                                    ost_end_active = false;
-                                    start(&settings.auto_start,&mut splits);
-                                }
+                        _ if prev_room == "PLACE_MENU" => {
+                            let namer_event = _namer.update_infallible(objVar("DEVICE_NAMER","EVENT")); //get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT")
+                            timer::set_variable_float("Namer Event",namer_event.current);
+                            if namer_event.current == 75.0 && namer_event.old != 75.0 {
+                                start(&settings.auto_start,&mut splits,&mut item_tracker);
                             }
                         }
+                        _ => ()
                     }
+                    timer::set_variable("litem address",format!("{}",global.ptr(&process,&stringsList,"litem[0]")).as_str());
 
 
                     // if we're not in the middle of a run, no reason to do anything not related to autostart (note that IGT pauses don't affect whether the timer state counts as running or paused)
-                    if timer::state() == TimerState::Running {
-                        let fighting = fighting_ptr.update_value(&process);
-                        timer::set_variable_float("fighting",fighting.current); //not tracked for Chapter 1 (except in 32-bit 1+2 Demo versions)
-                        //the next few vars are not in SP
-                        let text = text_ptr1.update_value(&process);
-                        timer::set_variable("text",text.current.validate_utf8().unwrap_or_default());
+                    if timer::state() == TimerState::Running && chapter > 0 {
+                        if settings.item_tracking && chapter > 0 && cur_room != "PLACE_MENU" {
+
+                            let mut itemCheck = |itemType,inv,offset| item_check_slot(&process,&mut item_tracker,&item_map,chapter,itemType,global.ptr(&process,&stringsList,inv).add(offset));
+                            /*match darkzone.current {
+                                1.0 => {
+                                    for i in 0..12 as u64 {
+                                        let offset = i * 0x10;
+                                        item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemType::Item,globPtr("item[0]").add(offset));
+                                        item_check_slot(&process,&mut item_tracker,&item_map,chapter,KeyItem,globPtr("keyitem[0]").add(offset));
+                                        item_check_slot(&process,&mut item_tracker,&item_map,chapter,Weapon,globPtr("weapon[0]").add(offset));
+                                        item_check_slot(&process,&mut item_tracker,&item_map,chapter,Armor,globPtr("armor[0]").add(offset));
+                                        if chapter > 1 {
+                                            item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemType::Item,globPtr("pocketitem[0]").add(offset));
+                                        }
+                                    }
+                                    if chapter > 1 {
+                                        for i in 12..48 as u64 {
+                                            let offset = i * 0x10;
+                                            item_check_slot(&process,&mut item_tracker,&item_map,chapter,Weapon,globPtr("weapon[0]").add(offset));
+                                            item_check_slot(&process,&mut item_tracker,&item_map,chapter,Armor,globPtr("armor[0]").add(offset));
+                                            if (i < match chapter { 2|3 => 24, 4 => 36, 5 => 48, _ => unreachable!()}) {
+                                                item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemType::Item,globPtr("pocketitem[0]").add(offset));
+                                            }
+                                        }
+                                    }
+                                }
+                                0.0 => {
+                                    for i in 0..12 as u64 {
+                                            let offset = i * 0x10;
+                                            item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemLW,globPtr("litem[0]").add(offset));
+                                    }
+                                }
+                                _ => () //should always be 1 or 0
+                            }*/
+                            for offset in (0..arr_pos(12)).step_by(0x10) {
+                                if offset < arr_pos(8) {
+                                    itemCheck(ItemLW,"litem[0]",offset);
+                                }
+                                itemCheck(ItemType::Item,"item[0]",offset);
+                                itemCheck(KeyItem,"keyitem[0]",offset);
+                                itemCheck(Weapon,"weapon[0]",offset);
+                                itemCheck(Armor,"armor[0]",offset);
+                                if chapter > 1 {
+                                    itemCheck(ItemType::Item,"pocketitem[0]",offset);
+                                }
+                            }
+                            if chapter > 1 {
+                                for offset in (arr_pos(12)..arr_pos(48)).step_by(0x10) {
+                                    itemCheck(Weapon,"weapon[0]",offset);
+                                    itemCheck(Armor,"armor[0]",offset);
+                                    if offset < match chapter { 2|3 => arr_pos(24), 4 => arr_pos(36), 5 => arr_pos(48), _ => unreachable!()} {
+                                        itemCheck(ItemType::Item,"pocketitem[0]",offset);
+                                    }
+                                }
+                            }
+                            let items_obtained = item_tracker.len();
+                            timer::set_variable("Items",format!("{}/160",items_obtained).as_str())
+                        }
+
+
+                        let mut globVal = |name| global.num(&process,&stringsList,name);
+                        let fighting = _fighting.update_infallible(globVal("fighting"));
+                        timer::set_variable_float("fighting",fighting.current);
+                        let plot = _plot.update_infallible(globVal("plot"));
+                        timer::set_variable_float("Plot",plot.current);
+                        timer::set_variable_float("Plot Alt",get_inst_var::<f64>(&process,version,&stringsList,process.read_pointer(DELTARUNE.add(0x49C3E0),ps).unwrap_or(Address::NULL),"plot"));
+                        let choice = _choice.update_infallible(globVal("choice"));
+                        timer::set_variable_float("Choice",choice.current);
+                        let msc = _msc.update_infallible(globVal("msc"));
+                        timer::set_variable_float("msc",msc.current);
+                        let darkzone = _darkzone.update_infallible(globVal("darkzone"));
+                        timer::set_variable_float("Dark World",darkzone.current);
+
+                        //the next few vars are not detected for SP
                         let snd = snd_ptr.update_value(&process);
                         timer::set_variable("snd",snd.current.validate_utf8().unwrap_or_default());
                         let mus = mus_ptr.update_value(&process);
                         timer::set_variable("mus",mus.current.validate_utf8().unwrap_or_default());
 
+                        //we don't really want to be constantly tracking text, we want to only check it in rooms with text splits
+                        //let text = text_ptr1.update_value(&process);
+                        //timer::set_variable("text",text.current.validate_utf8().unwrap_or_default());
+
                         match chapter {
                             // Chapter 1 logic
                             1 => {
-                                let choice = choicer_ptr.update_value(&process);
-                                timer::set_variable_float("Choice",choice.current);
-                                let msc = msc_ptr.update_value(&process);
-                                timer::set_variable_float("msc",msc.current);
 
-                                let great_door_con = great_door_con_ptr.update_value(&process);
-                                timer::set_variable_float("doorCon",great_door_con.current);
-                                let king_pos = king_pos_ptr.update_value(&process);
-                                timer::set_variable_float("kingPos",king_pos.current);
+                                let con = _con.update_infallible(match cur_room {
+                                    "PLACE_CONTACT" => objVar(&chapter1ify("DEVICE_CONTACT",),"EVENT"),
+                                    "room_castle_darkdoor" => objVar(&chapter1ify("obj_darkdoorevent"), "con"),
+                                    "room_cc_joker" => objVar(&chapter1ify("obj_joker_body"), "dancelv"),
+                                    _ => 0.0
+                                });
 
-                                //SP-only vars
-                                let plot = plot_ptr.update_value(&process);
-                                timer::set_variable_float("Plot",plot.current);
-                                let filechoice = filechoice_ptr.update_value(&process);
-                                timer::set_variable_float("fileChoice",filechoice.current);
-                                let jevil_dance1 = jevil_dance_ptr1.update_value(&process);
-                                timer::set_variable_float("Jevil Dance",jevil_dance1.current);
-                                let jevil_dance2 = jevil_dance_ptr2.update_value(&process);
-                                timer::set_variable_float("Jevil Dance (2)",jevil_dance2.current);
-                                let final_textbox1 = final_textbox_ptr1.update_value(&process);
-                                timer::set_variable_float("Final Textbox",final_textbox1.current);
-                                let final_textbox2 = final_textbox_ptr2.update_value(&process);
-                                timer::set_variable_float("Final Textbox (2)",final_textbox2.current);
-
-                                // OST% ending (delayed split after room transition)
-                                if ost_end_active && ost_end_started.elapsed() >= Duration::from_millis(3600) {
-                                    ost_end_active = false;
-                                    split(&mut splits, &settings, "ch1_ending_ost", false);
-                                }
+                                let text_check = _text_check.update_infallible(match cur_room {
+                                    "room_krisroom" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, &chapter1ify("obj_writer")),
+                                                                  r"* (You decided to go to bed.)/%",
+                                                                  r"＊ (ねむることにした)/%"),
+                                    _ => false
+                                });
 
                                 // Chapter 1 room change splits
                                 if room.current != room.old {
                                     split(&mut splits, &settings, match (prev_room,cur_room) {
-                                        ("PLACE_CONTACT","room_krisroom") => "ch1_contact",
                                         ("room_krisroom","room_dark1") => "ch1_bedskip",
                                         ("room_insidecloset","room_dark1") => "ch1_school",
                                         ("room_dark7","room_dark_chase1") => "ch1_cliffs",
@@ -1310,16 +673,7 @@ async fn main() {
                                         ("room_forest_savepoint_relax","room_forest_maze1") => "ch1_enter_forest_maze",
                                         ("room_forest_fightsusie","room_forest_afterthrash2") => "ch1_susie_lancer_exit",
                                         ("room_forest_castlefront","room_cc_prison_cells") => "ch1_get_captured",
-                                        ("room_cc_prison_cells","room_cc_prison_cells") => match tempVar { //only split the 2nd time this room transition happens
-                                            1 => {
-                                                tempVar = 0;
-                                                "ch1_escape_prison"
-                                            },
-                                            _ => {
-                                                tempVar = 1;
-                                                ""
-                                            }
-                                        },
+                                        ("room_cc_prison_cells","room_cc_prisonlancer") if plot.current == 156.0 => "ch1_escape_prison",
                                         ("room_cc_prison_to_elevator","room_cc_prisonelevator") => "ch1_enter_elevator",
                                         ("room_forest_fightsusie","room_field3") => "ch1_cf_warp",
                                         ("room_field3","room_forest_savepoint2") => "ch1_fb_warp",
@@ -1332,61 +686,45 @@ async fn main() {
                                         ("room_cc_kingbattle","room_cc_prefountain") => "ch1_post_king",
                                         ("room_cc_prefountain","room_cc_fountain") => "ch1_enter_fountain",
                                         ("room_cc_fountain","room_school_unusedroom") => "ch1_seal_fountain",
-                                        ("room_krisroom","room_ed") => { //setup for OST% ending split, which is delayed
-                                            ost_end_active = true;
-                                            ost_end_started = Instant::now();
-                                            ""
-                                        }
                                         _ => ""
                                     },false);
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
-                                        "room_castle_darkdoor" if great_door_con.bytes_changed_from_to(&7.0,&21.0) => "ch1_castle_town_door",
+                                        "PLACE_CONTACT" if con.bytes_changed_from_to(&75.0,&76.0) => "ch1_contact",
+                                        "room_castle_darkdoor" if con.bytes_changed_from_to(&7.0, &21.0) => "ch1_castle_town_door",
                                         "room_man" if msc.bytes_changed_to(&601.0) && choice.current == 0.0 => "ch1_egg",
-                                        "room_cc_joker" if match version {
-                                            SP => jevil_dance1.current == 4.0 || jevil_dance2.current == 4.0,
-                                            _ => mus.old.validate_utf8().unwrap_or_default().ends_with(r"mus\joker.ogg") && mus.current.matches(""),
-                                        } => "ch1_beat_jevil",
-                                        "room_cc_kingbattle" if king_pos.old == 680.0 && king_pos.current >= 1020.0 && king_pos.current <= 1030.0 => "ch1_king",
-
-                                        "room_krisroom" if match version {
-                                            SP => !SPEndingTriggered && plot.current == 251.0 && (final_textbox1.bytes_changed_from(&2.0) || final_textbox2.bytes_changed_from(&2.0) || filechoice.current > 2.0),
-                                          _ => text_close_check(&text,r"* (You decided to go to bed.)/%",r"＊ (ねむることにした)/%")
-                                        } => "ch1_ending",
-
+                                        "room_cc_joker" if con.bytes_changed_to(&4.0) => "ch1_beat_jevil",
+                                        "room_cc_kingbattle" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch1_king", //delay_split_frames("ch1_king",10).await
+                                        "room_krisroom" if text_check.changed_to(&true) => "ch1_ending",
+                                        "room_ed" if objVar("obj_credits","timer") >= 108.0 => "ch1_ending_ost",
                                         _ => ""
                                     },false);
                                 }
                             }
                             // Chapter 2 logic
                             2 => {
-                                let choice = choicer_ptr.update_value(&process);
-                                timer::set_variable_float("Choice",choice.current);
-                                let msc = msc_ptr.update_value(&process);
-                                timer::set_variable_float("msc",msc.current);
 
-                                let loaded_disk_bg = loaded_disk_bg_ptr.update_value(&process);
-                                timer::set_variable_float("LoadedDisk BG",loaded_disk_bg.current);
-                                let snowgrave = snowgrave_ptr.update_value(&process);
-                                timer::set_variable_float("SnowGrave",snowgrave.current);
+                                let con = _con.update_infallible(match cur_room {
+                                    "room_shop_ch2_spamton" => objVar( "obj_shop_ch2_spamton", "greybgtimer"),
+                                    "room_dw_city_berdly" => objVar( "obj_spell_snowgrave", "timer"),
+                                    _ => 0.0
+                                });
+                                timer::set_variable_float("LoadedDiskBG/Snowgrave",con.current);
 
-                                //variables only in versions with change_game
-                                let text_all = match version {
-                                    SP => unreachable!(),
-                                    Invalid => vec![text],
-                                    D109 | D110 | D115 => vec![text],
-                                    D119 => vec![text,text_ptr2.update_value(&process),text_ptr3.update_value(&process)],
-                                    Ch4_v102 | Ch5_v244 | Ch5_v247 => vec![text,text_ptr2.update_value(&process),text_ptr3.update_value(&process),text_ptr4.update_value(&process)],
-                                };
-                                for i in 1..text_all.len() {
-                                    timer::set_variable(format!("Text ({})",i+1).as_str(),text_all[i].current.validate_utf8().unwrap_or_default());
-                                }
-                                /*let text2 = text_ptr2.update_value(&process);
-                                timer::set_variable("Text (2)",text2.current.validate_utf8().unwrap_or_default());
-                                let text3 = text_ptr3.update_value(&process);
-                                timer::set_variable("Text (3)",text3.current.validate_utf8().unwrap_or_default());
-                                let text4 = text_ptr4.update_value(&process);
-                                timer::set_variable("Text (4)",text4.current.validate_utf8().unwrap_or_default());*/
+                                let text_check = _text_check.update_infallible(match cur_room {
+                                    "room_dw_cyber_queen_boxing" => textCheck(r"\\EH* C'mon^1, let's go after her!/%", r"\\EH＊ おまえら^1！&　 追っかけるぞ！/%"),
+                                    "room_dw_city_big_2" => textCheck(r"* (You got the FreezeRing.)/%",r"＊ (凍てつく指輪を　手に入れた)/%"),
+                                    "room_dw_city_moss" => textCheck(r"\S1* (You got the ThornRing.)/%",r"\S1＊ (いばらの指輪を　手に入れた)/%",),
+                                    "room_dw_castle_west_cliff" => textCheck(r"* (You have too many \cYWEAPONs\cW to&||take \cYPuppetScarf\c0.)/%",
+                                                                              r"＊ (\cYぶき\cWが多すぎて&　 \cYパペットマフラー\c0を&　 持てない)/%"),
+                                    "room_torhouse" => textCheck(r"* (... Susie fell asleep.)/%",r"＊ (…スージィは　ねおちした)/%"),
+                                    _ => false
+                                });
+
+                                let text_check2 = _text_check2.update_infallible(match cur_room {
+                                    "room_torhouse" => textCheck(r"\E1* ... they're already&||asleep.../%",r"\E1＊ …ふたりとも　もう&　 ねむってしまったのね。/%"),
+                                    _ => false
+                                });
 
 
                                 //Chapter 2 room-change splits
@@ -1399,11 +737,11 @@ async fn main() {
                                         ("room_dw_cyber_queen_boxing","room_dw_cyber_musical_door") => "ch2_arcade_room",
                                         ("room_dw_cyber_musical_door","room_dw_cyber_musical_shop") => "ch2_dj_shop",
                                         ("room_dw_cyber_teacup_final","room_dw_cyber_rollercoaster") => "ch2_ragger2_room",
-                                        ("room_dw_cyber_musical_door","room_dw_city_intro") => match bagel_door {
+                                        ("room_dw_cyber_musical_door","room_dw_city_intro") => match plot.old < 60.0  {
                                           true => "ch2_cf_tz_skip",
                                           false => "ch2_cf_tz_warp"
                                         },
-                                        ("room_dw_cyber_musical_door","room_dw_mansion_entrance") => match bagel_door {
+                                        ("room_dw_cyber_musical_door","room_dw_mansion_entrance") => match plot.old < 60.0 {
                                           true => "ch2_cf_m_skip",
                                           false => "ch2_cf_m_warp"
                                         },
@@ -1427,31 +765,22 @@ async fn main() {
                                         ("room_dw_mansion_top","room_dw_mansion_top_post") => "ch2_giga_queen",
                                         ("room_dw_mansion_top_post","room_cc_fountain") | //Side A Fountain
                                         ("room_dw_mansion_prefountain","room_dw_mansion_fountain") => "ch2_enter_fountain", //Side B Fountain
-                                        ("room_cc_fountain" | "room_dw_mansion_fountain","room_lw_computer_lab") => "ch2_giga_queen",
+                                        ("room_cc_fountain" | "room_dw_mansion_fountain","room_lw_computer_lab") => "ch2_seal_fountain",
                                         ("room_torhouse","room_ed") => "ch2_ending_ost",
                                         _ => ""
 
-                                    },false);
-                                    if bagel_door { bagel_door = false; }
+                                    },false)
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
-                                          "room_dw_cyber_queen_boxing" if msc.current == 1015.0 && mus.bytes_changed() && mus.current.validate_utf8().unwrap_or_default().ends_with(r"mus\cyber.ogg")
-                                          => "ch2_arcade_text",
-
+                                          "room_dw_cyber_queen_boxing" if text_check.changed_to(&false) => "ch2_arcade_text",
+                                          //"room_dw_cyber_queen_boxing" if plot.bytes_changed_to(&55.0) => delay_split_frames("ch2_arcade_text", 1).await,
                                           "room_dw_cyber_music_final" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch2_dj_battle",
-                                          "room_dw_city_big_2" if text_open_check_multipointer(&text_all,r"* (You got the FreezeRing.)/%", r"＊ (凍てつく指輪を　手に入れた)/%") => "ch2_freeze_ring",
-                                          "room_dw_city_moss" if text_close_check_multipointer(&text_all,r"\S1* (You got the ThornRing.)/%", r"\S1＊ (いばらの指輪を　手に入れた)/%") => "ch2_thorn_ring",
+                                          "room_dw_city_big_2" if text_check.changed_to(&true) => "ch2_freeze_ring",
+                                          "room_dw_city_moss" if text_check.changed_to(&false) => "ch2_thorn_ring",
                                           "room_dw_cyber_musical_door" | "room_dw_city_man" if msc.old == 1173.0 && msc.current >= 1173.0 && choice.current <= 0.0 => "ch2_egg",
-
-                                          "room_dw_castle_west_cliff" if text_open_check_multipointer(&text_all,r"* (You have too many \cYWEAPONs\cW to&||take \cYPuppetScarf\c0.)/%", r"＊ (\cYぶき\cWが多すぎて&　 \cYパペットマフラー\c0を&　 持てない)/%")
-                                          => "ch2_thorny_ending",
-
-                                          "room_torhouse" if text_open_check_multipointer(&text_all,r"* (... Susie fell asleep.)/%", r"＊ (…スージィは　ねおちした)/%") => "ch2_ending_ac",
-                                          "room_torhouse" if text_open_check_multipointer(&text_all,r"\E1* ... they're already&||asleep.../%", r"\E1＊ …ふたりとも　もう&　 ねむってしまったのね。/%") => "ch2_ending_il",
-
-                                          "room_dw_cyber_musical_door" if text_close_check_multipointer(&text_all,r"* (You were crushed under the&||weight of 400 bagels and&||defeated instantly...)/%", r"＊ (ベーグル400コの　重みに耐えきれ^1ず&　たちまち　力つきた…)/%")
-                                          => { bagel_door = true; "" }
-
+                                          "room_dw_castle_west_cliff" if text_check.changed_to(&true) => "ch2_thorny_ending",
+                                          "room_torhouse" if text_check.changed_to(&true) => "ch2_ending_ac",
+                                          "room_torhouse" if text_check2.changed_to(&true) => "ch2_ending_il",
                                           _ => ""
                                     },false);
                                 }
@@ -1459,15 +788,18 @@ async fn main() {
                             }
                             // Chapter 3 logic
                             3 => {
-                                let plot = plot_ptr.update_value(&process);
-                                timer::set_variable_float("Plot",plot.current);
 
-                                let knight_result = knight_result_ptr.update_value(&process);
-                                timer::set_variable_float("Knight Result",knight_result.current);
-                                let egg_timer = egg_timer_ptr.update_value(&process);
-                                timer::set_variable_float("Egg Timer",egg_timer.current);
-                                let mantle_outro = mantle_outro_ptr.update_value(&process);
-                                timer::set_variable_float("Mantle Outro",mantle_outro.current);
+                                let flag = _flag.update_infallible(match cur_room {
+                                    "room_dw_ch3_man" => process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(930))).unwrap_or_default(),
+                                    "room_dw_snow_zone" => process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(1047))).unwrap_or_default(),
+                                    _ => 0.0
+                                });
+                                timer::set_variable_float("Flag",flag.current);
+                                let mantle_outro = _instExist.update_infallible(match cur_room {
+                                    "room_shadowmantle" => match process.read::<i32>(mantleOutro_instCount) { Ok(1) => true, _ => false },
+                                    _ => false
+                                });
+                                timer::set_variable("Mantle Outro",mantle_outro.current.to_string().as_str());
 
                                 if cur_room != prev_room {
                                     split(&mut splits,&settings,match (prev_room,cur_room) {
@@ -1497,35 +829,36 @@ async fn main() {
                                     },false);
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
-                                          "room_dw_snow_zone" if knight_result.bytes_changed_from(&0.0) => match knight_result.current {
+                                          "room_dw_snow_zone" if flag.bytes_changed_from(&0.0) => match flag.current {
                                               1.0 => "ch3_knight_win",
                                               2.0 => "ch3_knight_death",
-                                              _ => ""
+                                              _ => "" //there shouldn't be any other possibility here?
                                           },
                                           "room_dw_snow_zone" if fighting.bytes_changed_from_to(&0.0,&1.0) => "ch3_enter_knight",
-
                                           "room_town_shelter" if mus.current.matches("") && mus.old.validate_utf8().unwrap_or_default().ends_with(r"mus\night_ambience.ogg")
                                           => "ch3_ending",
-
-                                          "room_dw_man" if egg_timer.old <= 1.0 && egg_timer.current > 1.0 => "ch3_egg",
-                                          "room_shadowmantle" if mantle_outro.bytes_changed_to(&0.125) => "ch3_end_mantle",
+                                          "room_dw_man" if flag.bytes_changed_from_to(&0.0,&1.0) => "ch3_egg",
+                                          "room_shadowmantle" if mantle_outro.changed_to(&true) => "ch3_end_mantle",
                                           _ => ""
                                     },false);
                                 }
                             }
                             // Chapter 4 logic
                             4 => {
-                                let plot = plot_ptr.update_value(&process);
-                                timer::set_variable_float("Plot",plot.current);
 
-                                let mike_action = mike_action_ptr.update_value(&process);
-                                timer::set_variable_float("Mike Action",mike_action.current);
-                                let susie_sprite = susie_sprite_ptr.update_value(&process);
-                                timer::set_variable_int("Susie Sprite",susie_sprite.current);
-                                let player_x = player_x_ptr.update_value(&process);
-                                timer::set_variable_float("Player X",player_x.current);
-                                let player_y = player_y_ptr.update_value(&process);
-                                timer::set_variable_float("Player Y",player_y.current);
+                                let con = _con.update_infallible(match cur_room {
+                                    "room_dw_castle_tv_zone_battle" if fighting.current == 1.0 => objVar("obj_mike_attack_controller","action"),
+                                    "room_torhouse" => objVar("obj_ch4_LWF03","upstairscon"),
+                                    "room_dw_church_arena" => objVar("obj_hammer_of_justice_enemy","nohairsprite"),
+                                    _ => 0.0
+                                });
+                                timer::set_variable_float("MikeAction/GersonDone/Ending",con.current);
+
+                                let text_check = _text_check.update_infallible(match cur_room {
+                                    "room_dw_churchb_man" => textCheck(r"* (An Egg was picked up from a&||nearby easel.)/%",r"＊ (近くのイーゼルから\n　 タマゴを　拾いあげた)/%"),
+                                    "room_dw_churchc_prophecies" => textCheck(r"* (\cYPrincessRBN\cW was added to your&||\cYARMORs\cW.)/%",r"＊ (\cYプリティリボン\cWが&　 \cYぼうぐ\cWに　加わった)/%"),
+                                    _ => false
+                                });
 
                                 if cur_room != prev_room {
                                     split(&mut splits,&settings,match (prev_room,cur_room) {
@@ -1540,11 +873,7 @@ async fn main() {
                                         ("room_dw_church_gersonstudy","room_dw_church_arena") => "ch4_enter_hoj",
                                         ("room_dw_church_arena","room_dw_church_gersonstudy") => "ch4_exit_axe_room",
                                         ("room_dw_church_gersonstudy","room_dw_church_trueclimbadventure" | "room_dw_church_rightconnect") => "ch4_grand_piano",
-                                        ("room_dw_church_holywatercooler","room_dw_church_intro_gerson") => "ch4_miss_mizzle",
-                                        ("room_dw_church_fountain","room_lw_church_entrance") => "ch4_first_sanctuary",
-                                        ("room_dw_churchb_darkclimb_scene","room_dw_churchb_darkclimb") => "ch4_fall_down",
-                                        ("room_dw_churchb_nongerson","room_dw_churchb_nongerson_post") => "ch4_sound_of_justice",
-                                        ("room_dw_churchb_fountain","room_lw_church_entrance") => "ch4_second_sanctuary",
+                                        ("room_dw_church_holywatercooler","roohurch_entrance") => "ch4_second_sanctuary",
                                         ("room_dw_churchc_pretitan","room_dw_churchc_titanclimb1") => "ch4_start_titan_climb1",
                                         ("room_dw_churchc_titanclimb1","room_dw_churchc_titanclimb1_post") => "ch4_end_titan_climb1",
                                         ("room_dw_churchc_titanclimb1_post","room_dw_churchc_titanclimb2") => "ch4_start_titan_climb2",
@@ -1559,32 +888,29 @@ async fn main() {
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
                                         "room_dw_castle_tv_zone_battle" if fighting.old == 0.0 && fighting.current == 1.0 => "ch4_start_mike",
-                                        "room_dw_castle_tv_zone_battle" if fighting.current == 1.0 && mike_action.bytes_changed_to(&18.0) => "ch4_beat_mike",
+                                        "room_dw_castle_tv_zone_battle" if fighting.current == 1.0 && con.bytes_changed_to(&18.0) => "ch4_beat_mike",
                                         "room_dw_church_jackenstein" if fighting.old == 1.0 && fighting.current == 0.0 => "ch4_jackenstein",
-                                        "room_dw_church_arena" if fighting.current == 1.0 && susie_sprite.changed() => match (susie_sprite.old,susie_sprite.current) {
-                                            (3128|3129|3130,_) => { tempVar = 1; ""}
-                                            (1535,1553) | (1536,1554) if tempVar == 1 => "ch4_hammer_of_justice",
-                                            _ => ""
-                                        }
-                                        "room_dw_churchb_man" if text_close_check(&text,r"* (An Egg was picked up from a&||nearby easel.)/%", "＊ (近くのイーゼルから\n　 タマゴを　拾いあげた)/%")
-                                        => "ch4_egg",
-                                        "room_dw_churchc_prophecies" if text_open_check(&text,r"* (\cYPrincessRBN\cW was added to your&||\cYARMORs\cW.)/%", r"＊ (\cYプリティリボン\cWが&　 \cYぼうぐ\cWに　加わった)/%")
-                                        => "ch4_princess_ribbon",
+                                        "room_dw_church_arena" if fighting.current == 1.0 && con.bytes_changed_from(&0.0) => "ch4_hammer_of_justice",
+                                        "room_dw_churchb_man" if text_check.changed_to(&false) => "ch4_egg",
+                                        "room_dw_churchc_prophecies" if text_check.changed_to(&true) => "ch4_princess_ribbon",
                                         "room_dw_churchc_titanclimb2_post" if fighting.old == 0.0 && fighting.current == 1.0 => "ch4_start_titan_fight",
-                                        "room_torhouse" if plot.current == 310.0 && (player_x.bytes_changed() || player_y.bytes_changed()) && player_x.current < 160.0 && player_y.current < 80.0
-                                        => "ch4_ending_il",
+                                        "room_torhouse" if con.bytes_changed_from_to(&0.0,&1.0) => "ch4_ending_il",
                                         _ => ""
                                     },false);
                                 }
                             }
                             // Chapter 5 logic
                             5 => {
-                                let choice = choicer_ptr.update_value(&process);
-                                timer::set_variable_float("Choice",choice.current);
-                                let pink_coins = pink_coins_ptr.update_value(&process);
-                                timer::set_variable_float("Pink Coins",pink_coins.current);
-                                let crt_start = crt_start_ptr.update_value(&process);
-                                timer::set_variable_int("CRT Start",crt_start.current);
+                                let crt_start = _instExist.update_infallible(match cur_room {
+                                    "room_beach" => match process.read::<i32>(crtEnd_instCount) { Ok(1) => true, _ => false },
+                                    _ => false
+                                });
+                                timer::set_variable("CRT Start",crt_start.current.to_string().as_str());
+
+                                let text_check = _text_check.update_infallible(match cur_room {
+                                    "room_town_mid" => textCheck(r"* (You got the Bread.)/%",r"＊ (パンを　てにいれた)/%"),
+                                    _ => false
+                                });
 
                                 if prev_room != cur_room {
                                     split(&mut splits,&settings,match (prev_room,cur_room) {
@@ -1612,7 +938,8 @@ async fn main() {
                                         ("room_dw_fcastle_foyer","room_dw_fcastle_cafe") => "ch5_enter_right",
                                         ("room_dw_fcastle_right_endingscene","room_dw_fcastle_foyer") => "ch5_exit_right",
                                         ("room_dw_fcastle_foyer","room_dw_fcastle_asgore") => "ch5_beanstalk",
-                                        ("room_shop","room_dw_cliff_shop") if tempVar == 1 => "ch5_pink_shop",
+                                        ("room_shop","room_dw_cliff_shop") if arrCheck(global.ptr(&process,&stringsList,"keyitem[0]"),
+                                                                     32.0, 0, 11) => "ch5_pink_shop",
                                         ("room_dw_fcastle_top_pinkdoor","room_dw_fcastle_pinkroom") => "ch5_pink_door",
                                         ("room_dw_fcastle_pinkroom","room_dw_pink_encounter") => "ch5_pink_start",
                                         ("room_dw_pink_encounter","room_dw_fcastle_pinkroom") => "ch5_pink_exit",
@@ -1624,9 +951,9 @@ async fn main() {
                                         ("room_dw_fcastle_flowerclimb","room_dw_fcastle_flowerydash") => "ch5_end_final_climb",
                                         ("room_dw_fcastle_flowerydash","room_dw_post_flowery_battle") => "ch5_omega_flowery",
                                         ("room_dw_fcastle_top_fountain","room_dw_post_fountain_close") => "ch5_fountain1",
-                                        ("room_cc_fountain","room_flowershop_2f") => { tempVar = 1; "ch5_fountain2" }, //Completion data can only happen after this and in the same session
-                                        (_,"PLACE_MENU") => {tempVar = 0;""} //just in case, make sure to disable the completion data split's eligibility if you somehow go back to the menu and load a different save (which shouldn't really be possible on PC since you're in the Light World)
-                                        (_,"room_schooldoor") if tempVar == 1 => "ch5_ending_completion_data",
+                                        ("room_cc_fountain","room_flowershop_2f") => "ch5_fountain2",
+                                        (_,"room_schooldoor") if process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(1324))).unwrap_or_default() == 3.0
+                                        => "ch5_ending_completion_data",
                                         ("room_schooldoor","room_ed") => "ch5_ending_src",
                                         _ => ""
                                     },false);
@@ -1635,20 +962,19 @@ async fn main() {
                                         "room_dw_garden_aqua" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch5_aqua_end",
                                         "room_man" if choice.bytes_changed_from_to(&-1.0,&0.0) => "ch5_egg",
                                         "room_dw_cliff_sethaqua_battle" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch5_beat_seth_aqua",
-                                        "room_shop" if settings.ch5_pink_shop && pink_coins.decreased() => { tempVar = 1; "" },
                                         "room_dw_pink_encounter" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch5_pink_end",
                                         "room_dw_fcastle_flowery" if fighting.bytes_changed_from_to(&0.0,&1.0) => "ch5_start_flowery",
-                                        "room_beach" if crt_start.changed_to(&16777215) => "ch5_sideb",
+                                        "room_flowershop_2f" if plot.bytes_changed_to(&560.0) => "ch5_seed_packets",
+                                        "room_mid_town" if text_check.changed_to(&true) => "ch5_bread",
+                                        "room_beach" if crt_start.changed_to(&true) => "ch5_sideb",
                                         _ => ""
                                     },false);
                                 }
                             }
                             _ => {}
                         }
+
                     }
-
-
-
 
                     // TODO: Do something on every tick.
                     next_tick().await;
