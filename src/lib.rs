@@ -229,7 +229,7 @@ async fn main() {
                     ps64 => room_array_addr.add(process.read::<i32>(room_array_addr).unwrap_or_default() as u64 + 4),
                     _ => room_array_addr
                 };
-                timer::set_variable("Room Array Address",format!("{:X}",room_array_addr.value()).as_str());
+                //timer::set_variable("Room Array Address",format!("{:X}",room_array_addr.value()).as_str());
 
                 /*let room_id_addr = match ps {
                     PointerSize::Bit64 => {
@@ -246,7 +246,7 @@ async fn main() {
                     ps64 => room_id_addr.add(process.read::<i32>(room_id_addr).unwrap_or_default() as u64 + 4),
                     _ => room_id_addr
                 };
-                timer::set_variable("Room ID Address",format!("{:X}",room_id_addr.value()).as_str());
+                //timer::set_variable("Room ID Address",format!("{:X}",room_id_addr.value()).as_str());
 
                 let mut room_watch = Watcher::<i32>::new();
                 let mut room_name_watch = Watcher::<ArrayCString<64>>::new();
@@ -491,7 +491,10 @@ async fn main() {
 
                     let room_id = room_watch.update(process.read::<i32>(room_id_addr).ok())
                         .unwrap_or(&Pair { old: 0i32, current: 0i32 });
-                    timer::set_variable_int("Room ID", room_id.current);
+                    {
+                        #![cfg(debug_assertions)]
+                        timer::set_variable_int("Room ID", room_id.current);
+                    }
 
                     let room_name_addr0 = process.read_pointer(room_array_addr,ps).unwrap_or_default().add(room_id.current as u64 * match ps { ps64 => 8, _ => 4});
                     let room_name_addr = process.read_pointer(room_name_addr0,ps).unwrap_or_default();
@@ -503,10 +506,13 @@ async fn main() {
                     let prev_room = room.old.validate_utf8().unwrap_or_default().trim_end_matches("_ch1");
                     //asr::timer::set_variable("Room Name Pointer Address",format!("{:X}",room_name_addr0.value()).as_str());
                     //asr::timer::set_variable("Room Name Address",format!("{:X}",room_name_addr.value()).as_str());
-                    timer::set_variable("Room Name",cur_room);
+                    {
+                        #![cfg(debug_assertions)]
+                        timer::set_variable("Room Name",cur_room);
 
-                    timer::set_variable("text",get_obj_str::<128>(&process, version, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default()); //
-                    timer::set_variable("writer addr",format!("{}",obj_addr_map.get(&"obj_writer".to_owned()).unwrap_or(&Address::NULL)).as_str());
+                        timer::set_variable("text",get_obj_str::<128>(&process, version, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default()); //
+                        timer::set_variable("writer addr",format!("{}",obj_addr_map.get(&"obj_writer".to_owned()).unwrap_or(&Address::NULL)).as_str());
+                    }
 
                     //timer::set_variable_float("Plot",globalFinder.readNum::<f64>(&process, &stringsList, "plot"));
 
@@ -554,12 +560,12 @@ async fn main() {
                         }
                         _ => ()
                     }
-                    timer::set_variable("litem address",format!("{}",global.ptr(&process,&stringsList,"litem[0]")).as_str());
+                    //timer::set_variable("litem address",format!("{}",global.ptr(&process,&stringsList,"litem[0]")).as_str());
 
 
                     // if we're not in the middle of a run, no reason to do anything not related to autostart (note that IGT pauses don't affect whether the timer state counts as running or paused)
                     if timer::state() == TimerState::Running && chapter > 0 {
-                        if settings.item_tracking && chapter > 0 && cur_room != "PLACE_MENU" {
+                        if settings.item_tracking && cur_room != "PLACE_MENU" {
 
                             let mut itemCheck = |itemType,inv,offset| item_check_slot(&process,&mut item_tracker,&item_map,chapter,itemType,global.ptr(&process,&stringsList,inv).add(offset));
                             /*match darkzone.current {
@@ -621,22 +627,24 @@ async fn main() {
 
                         let mut globVal = |name| global.num(&process,&stringsList,name);
                         let fighting = _fighting.update_infallible(globVal("fighting"));
-                        timer::set_variable_float("fighting",fighting.current);
                         let plot = _plot.update_infallible(globVal("plot"));
-                        timer::set_variable_float("Plot",plot.current);
-                        timer::set_variable_float("Plot Alt",get_inst_var::<f64>(&process,version,&stringsList,process.read_pointer(DELTARUNE.add(0x49C3E0),ps).unwrap_or(Address::NULL),"plot"));
                         let choice = _choice.update_infallible(globVal("choice"));
-                        timer::set_variable_float("Choice",choice.current);
                         let msc = _msc.update_infallible(globVal("msc"));
-                        timer::set_variable_float("msc",msc.current);
                         let darkzone = _darkzone.update_infallible(globVal("darkzone"));
-                        timer::set_variable_float("Dark World",darkzone.current);
 
                         //the next few vars are not detected for SP
                         let snd = snd_ptr.update_value(&process);
-                        timer::set_variable("snd",snd.current.validate_utf8().unwrap_or_default());
                         let mus = mus_ptr.update_value(&process);
-                        timer::set_variable("mus",mus.current.validate_utf8().unwrap_or_default());
+                        {
+                            #![cfg(debug_assertions)]
+                            timer::set_variable_float("In Battle",fighting.current);
+                            timer::set_variable_float("Plot",plot.current);
+                            timer::set_variable_float("Choice",choice.current);
+                            timer::set_variable_float("msc",msc.current);
+                            timer::set_variable_float("Dark World",darkzone.current);
+                            timer::set_variable("mus",mus.current.validate_utf8().unwrap_or_default());
+                            timer::set_variable("snd",snd.current.validate_utf8().unwrap_or_default());
+                        }
 
                         //we don't really want to be constantly tracking text, we want to only check it in rooms with text splits
                         //let text = text_ptr1.update_value(&process);
@@ -709,7 +717,10 @@ async fn main() {
                                     "room_dw_city_berdly" => objVar( "obj_spell_snowgrave", "timer"),
                                     _ => 0.0
                                 });
-                                timer::set_variable_float("LoadedDiskBG/Snowgrave",con.current);
+                                {
+                                    #![cfg(debug_assertions)]
+                                    timer::set_variable_float("LoadedDiskBG/Snowgrave",con.current);
+                                }
 
                                 let text_check = _text_check.update_infallible(match cur_room {
                                     "room_dw_cyber_queen_boxing" => textCheck(r"\\EH* C'mon^1, let's go after her!/%", r"\\EH＊ おまえら^1！&　 追っかけるぞ！/%"),
@@ -794,12 +805,15 @@ async fn main() {
                                     "room_dw_snow_zone" => process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(1047))).unwrap_or_default(),
                                     _ => 0.0
                                 });
-                                timer::set_variable_float("Flag",flag.current);
                                 let mantle_outro = _instExist.update_infallible(match cur_room {
                                     "room_shadowmantle" => match process.read::<i32>(mantleOutro_instCount) { Ok(1) => true, _ => false },
                                     _ => false
                                 });
-                                timer::set_variable("Mantle Outro",mantle_outro.current.to_string().as_str());
+                                {
+                                    #![cfg(debug_assertions)]
+                                    timer::set_variable_float("Flag",flag.current);
+                                    timer::set_variable("Mantle Outro",mantle_outro.current.to_string().as_str());
+                                }
 
                                 if cur_room != prev_room {
                                     split(&mut splits,&settings,match (prev_room,cur_room) {
@@ -852,7 +866,10 @@ async fn main() {
                                     "room_dw_church_arena" => objVar("obj_hammer_of_justice_enemy","nohairsprite"),
                                     _ => 0.0
                                 });
-                                timer::set_variable_float("MikeAction/GersonDone/Ending",con.current);
+                                {
+                                    #![cfg(debug_assertions)]
+                                    timer::set_variable_float("MikeAction/GersonDone/Ending",con.current);
+                                }
 
                                 let text_check = _text_check.update_infallible(match cur_room {
                                     "room_dw_churchb_man" => textCheck(r"* (An Egg was picked up from a&||nearby easel.)/%",r"＊ (近くのイーゼルから\n　 タマゴを　拾いあげた)/%"),
@@ -905,7 +922,10 @@ async fn main() {
                                     "room_beach" => match process.read::<i32>(crtEnd_instCount) { Ok(1) => true, _ => false },
                                     _ => false
                                 });
-                                timer::set_variable("CRT Start",crt_start.current.to_string().as_str());
+                                {
+                                    #![cfg(debug_assertions)]
+                                    timer::set_variable("CRT Start",crt_start.current.to_string().as_str());
+                                }
 
                                 let text_check = _text_check.update_infallible(match cur_room {
                                     "room_town_mid" => textCheck(r"* (You got the Bread.)/%",r"＊ (パンを　てにいれた)/%"),

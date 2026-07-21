@@ -114,12 +114,18 @@ impl LongTermVarReader {
 
     pub fn ptr(&mut self, process : &Process, stringsList : &HashMap<u32,String>, name : &str) -> Address {
         if self.cache.contains_key(name) {
-            timer::set_variable(&format!("{} from",name), "cache");
+            {
+                #![cfg(debug_assertions)]
+                timer::set_variable(&format!("{} from",name), "cache");
+            }
             return *self.cache.get(name).unwrap_or(&Address::NULL); //technically safety should already be ensured but we want to absolutely avoid any risk of panics
         }
         let foundPtr = self.finder.getVarPtr(process, stringsList, name);
         if !foundPtr.is_null() { self.cache.insert(name.to_owned(),foundPtr); }
-        timer::set_variable(&format!("{} from",name), "process");
+        {
+            #![cfg(debug_assertions)]
+            timer::set_variable(&format!("{} from",name), "process");
+        }
         foundPtr
     }
 
@@ -148,10 +154,16 @@ fn get_first_instance(process : &Process, version : EngineVersion , obj : Addres
     };
     //NOTE: 
     let instCount = process.read::<u32>(obj_prop.add(match version {GMS2_v2_2_0=>0xCC,GMS2_2022_1|GMS2_2022_2=>0x40,_=>0x78})).unwrap_or_default();
-    timer::set_variable("instance count",&format!("{}",instCount));
+    {
+        #![cfg(debug_assertions)]
+        timer::set_variable("instance count",&format!("{}",instCount));
+    }
     if instCount == 0 { return Address::NULL; }
     let node = process.read_pointer(obj_prop.add(match version {GMS2_v2_2_0=>0xC4,GMS2_2022_1|GMS2_2022_2=>0x38,_=>0x68}),ps).unwrap_or_default();
-    timer::set_variable("last found first node",&format!("{}",node));
+    {
+        #![cfg(debug_assertions)]
+        timer::set_variable("last found first node",&format!("{}",node));
+    }
     process.read_pointer(node.add(match ps {ps64=>0x10,_=>0x8}),ps).unwrap_or(Address::NULL)
 }
 
@@ -162,7 +174,10 @@ fn get_all_instances(process : &Process, version : EngineVersion, obj : Address)
         return vec;
     };
     let instCount = process.read::<u32>(obj_prop.add(match version {GMS2_v2_2_0=>0xCC,GMS2_2022_1|GMS2_2022_2=>0x40,_=>0x78})).unwrap_or_default();
-    timer::set_variable("instance count",&format!("{}",instCount));
+    {
+        #![cfg(debug_assertions)]
+        timer::set_variable("instance count",&format!("{}",instCount));
+    }
     if instCount == 0 { return vec; }
     let mut node = process.read_pointer(obj_prop.add(match version {GMS2_v2_2_0=>0xC4,GMS2_2022_1|GMS2_2022_2=>0x38,_=>0x68}),ps).unwrap_or_default();
     for i in 0..instCount {
