@@ -53,6 +53,8 @@ pub struct Settings {
     pub(crate) ac_unpause_loadsave : bool,
     ///Item Tracker
     pub(crate) item_tracking : bool,
+    ///Title Tracker
+    pub(crate) title_tracking : bool,
     ///Function with unrecognized data.win files (for brand-new patches, and mod speedruns)
     pub(crate) allow_unsupported_version : bool,
 

@@ -1,11 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 use asr::deep_pointer::DeepPointer;
 use asr::settings::Map;
 use asr::watcher::{Pair, Watcher};
 use asr::{Address, PointerSize, Process, string::ArrayCString, timer};
-use crate::item_tracking::Item;
-use crate::{AC_Pauses, IL_Pauses, OST_LateCh2_Pauses, OST_Pauses, ps32};
-use crate::{EngineVersion::{self,*}, settings::{*}, ps64};
+use crate::{AC_Pauses, IL_Pauses, OST_LateCh2_Pauses, OST_Pauses, globalPtrs, ps32, title_tracker};
+use crate::{EngineVersion::{self,*}, settings::{*}, ps64, objs, varNames, item_tracker};
+
+pub const fn arr_pos(i : u64) -> u64 { i * 0x10 }
 
 pub async fn delay_split_frames(name : &str, frames : u32) -> &str {
     for _ in 0..(2*frames) {
@@ -53,13 +54,13 @@ impl VarFinder {
     }
 
     //Find a pointer to a specific variable, this can be used to find initial pointers for variables of complex types
-    pub fn getVarPtr(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> Address {
+    pub fn getVarPtr(&self, process: &Process, name: &str) -> Address {
         for offset in (0..(process.read::<u32>(self.numAddr).unwrap_or_default() as u64)*self.jmp as u64).step_by(self.jmp) {
             let stringID = process.read::<u32>(self.arrAddr + offset + match self.version {GMS2_v2_2_0=>-0x4,GMS2_2022_1|GMS2_2022_2=>0x4,_=>0x8}).unwrap_or_default();
             /*if !matches!(self.version,GMS2_v2_2_0) && stringID < 100000 {
                 continue;
             }*/
-            if stringsList.get(&stringID).unwrap_or(&"".to_owned()) == name.trim_end_matches("[0]") {
+            if varNames.contains_key(&stringID) && *varNames.get(&stringID).unwrap() == name.trim_end_matches("[0]") {
                 if name.ends_with("[0]") {
                     match self.version { //there's no direct support for reading a pointer from a pointer path, so we need to specifically read different types (64-bit address vs 32-bit address) depending on 64-bit vs 32-bit
                         GMS2_v2_2_0 => { return Address::from(process.read_pointer_path::<u32>(self.arrAddr, self.ps,&[offset,0x0,0x24,0xC]).unwrap_or_default()); }
@@ -75,8 +76,8 @@ impl VarFinder {
 
     //Immediately read simple value from a variable, this is used to read numeric variable values from instances of objects without needing
     //not strictly limited to numbers, but most other types require further pointers
-    pub fn readNum<T: bytemuck::Pod + Default>(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> T {
-        let ptr = self.getVarPtr(process, stringsList, name);
+    pub fn readNum<T: bytemuck::Pod + Default>(&self, process: &Process, name: &str) -> T {
+        let ptr = self.getVarPtr(process, name);
         match ptr {
             Address::NULL => T::default(),
             _ => process.read::<T>(ptr).unwrap_or_default()
@@ -84,8 +85,8 @@ impl VarFinder {
     }
 
     //Strings take additional layers of pointers
-    pub fn readStr<const len : usize>(&self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> ArrayCString<len> {
-        let ptr = self.getVarPtr(process, stringsList, name);
+    pub fn readStr<const len : usize>(&self, process: &Process, name: &str) -> ArrayCString<len> {
+        let ptr = self.getVarPtr(process, name);
         match ptr {
             Address::NULL => ArrayCString::<len>::default(),
             _ => process.read_pointer_path::<ArrayCString<len>>(ptr,self.ps,&[0x0,0x0,0x0]).unwrap_or_default()
@@ -93,35 +94,32 @@ impl VarFinder {
     }
 }
 
-pub struct LongTermVarReader {
-    pub finder : VarFinder,
-    pub(crate) cache : HashMap<String,Address>
+pub struct GlobalReader {
+    pub finder : VarFinder
 }
 
-impl LongTermVarReader {
+impl GlobalReader {
     pub fn try_new(process: &Process, version : EngineVersion, instAddr: Address) -> Result<Self,asr::Error> {
-        Ok(LongTermVarReader {
+        Ok(GlobalReader {
             finder : VarFinder::try_new(process,version,instAddr)?,
-            cache : HashMap::<String,Address>::new()
         })
     }
     pub fn try_new_demo_global(process: &Process, version: EngineVersion, globalAddr: Address) -> Result<Self,asr::Error> {
-        Ok(LongTermVarReader {
+        Ok(GlobalReader {
             finder : VarFinder::try_new_demoGlobal(process,version,globalAddr)?,
-            cache : HashMap::<String,Address>::new()
         })
     }
 
-    pub fn ptr(&mut self, process : &Process, stringsList : &HashMap<u32,String>, name : &str) -> Address {
-        if self.cache.contains_key(name) {
+    pub fn ptr(&self, process : &Process, name : &str) -> Address {
+        if globalPtrs.contains_key(name) {
             {
                 #![cfg(debug_assertions)]
                 timer::set_variable(&format!("{} from",name), "cache");
             }
-            return *self.cache.get(name).unwrap_or(&Address::NULL); //technically safety should already be ensured but we want to absolutely avoid any risk of panics
+            return *globalPtrs.get(name).unwrap(); //technically safety should already be ensured but we want to absolutely avoid any risk of panics
         }
-        let foundPtr = self.finder.getVarPtr(process, stringsList, name);
-        if !foundPtr.is_null() { self.cache.insert(name.to_owned(),foundPtr); }
+        let foundPtr = self.finder.getVarPtr(process, name);
+        if !foundPtr.is_null() { globalPtrs.insert(name.to_owned(),foundPtr); }
         {
             #![cfg(debug_assertions)]
             timer::set_variable(&format!("{} from",name), "process");
@@ -129,8 +127,16 @@ impl LongTermVarReader {
         foundPtr
     }
 
-    pub fn num(&mut self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> f64 {
-        let ptr = self.ptr(process, stringsList, name);
+    pub fn num(&self, process: &Process, name: &str) -> f64 {
+        let ptr = self.ptr(process, name);
+        match ptr {
+            Address::NULL => 0.0,
+            _ => process.read::<f64>(ptr).unwrap_or_default()
+        }
+    }
+
+    pub fn arrNum(&self, process: &Process, name: &str, index : u64) -> f64 {
+        let ptr = self.ptr(process, name).add(index * 0x10);
         match ptr {
             Address::NULL => 0.0,
             _ => process.read::<f64>(ptr).unwrap_or_default()
@@ -138,8 +144,8 @@ impl LongTermVarReader {
     }
 
     //Strings take additional layers of pointers
-    pub fn str<const len : usize>(&mut self, process: &Process, stringsList: &HashMap<u32, String>, name: &str) -> ArrayCString<len> {
-        let ptr = self.ptr(process, stringsList, name);
+    pub fn str<const len : usize>(&self, process: &Process, name: &str) -> ArrayCString<len> {
+        let ptr = self.ptr(process, name);
         match ptr {
             Address::NULL => ArrayCString::<len>::default(),
             _ => process.read_pointer_path::<ArrayCString<len>>(ptr,self.finder.ps,&[0x0,0x0,0x0]).unwrap_or_default()
@@ -167,7 +173,7 @@ fn get_first_instance(process : &Process, version : EngineVersion , obj : Addres
     process.read_pointer(node.add(match ps {ps64=>0x10,_=>0x8}),ps).unwrap_or(Address::NULL)
 }
 
-fn get_all_instances(process : &Process, version : EngineVersion, obj : Address) -> Vec<Address> {
+pub fn get_all_instances(process : &Process, version : EngineVersion, obj : Address) -> Vec<Address> {
     let ps = verPs(version);
     let mut vec = Vec::<Address>::new();
     let Ok(obj_prop) = process.read_pointer(obj.add(match version {GMS2_2022_1|GMS2_2022_2=>0xC, _=>0x18}),ps) else {
@@ -187,22 +193,38 @@ fn get_all_instances(process : &Process, version : EngineVersion, obj : Address)
     vec
 }
 
-pub fn get_obj(map : &HashMap<String,Address>, name : &str) -> Address {
-    *map.get(&String::from(name)).unwrap_or(&Address::NULL)
+pub fn get_obj(name : &str) -> Address {
+    match objs.get(&String::from(name)) {
+        Some(addr) => *addr,
+        None => Address::NULL
+    } 
 }
 
-pub fn get_inst_var<T: bytemuck::Pod + Default>(process : &Process, version : EngineVersion, stringsList : &HashMap<u32,String>, inst : Address, name : &str) -> T {
+pub fn get_inst_var<T: bytemuck::Pod + Default>(process : &Process, version : EngineVersion, inst : Address, name : &str) -> T {
     match inst {
         Address::NULL => T::default(),
         inst => match VarFinder::try_new(&process,version,inst) {
-            Ok(finder) => finder.readNum::<T>(&process, stringsList, name),
+            Ok(finder) => finder.readNum::<T>(&process, name),
             Err(_) => T::default()
         }
     }
 }
 
-pub fn get_obj_inst(process : &Process, version : EngineVersion, objMap : &HashMap<String,Address>, _obj : &str) -> Address {
-    match get_obj(objMap,_obj) {
+pub fn get_inst_str<const len : usize>(process : &Process, version : EngineVersion, inst : Address, name : &str) -> ArrayCString<len> {
+    match inst {
+        Address::NULL => ArrayCString::<len>::default(),
+        inst => match VarFinder::try_new(&process,version,inst) {
+            Ok(finder) => {
+                let ptr = finder.getVarPtr(process, name);
+                process.read_pointer_path(ptr, verPs(version), &[0x0,0x0,0x0]).unwrap_or_default()
+            },
+            Err(_) => ArrayCString::<len>::default()
+        }
+    }
+}
+
+pub fn get_obj_inst(process : &Process, version : EngineVersion, _obj : &str) -> Address {
+    match get_obj(_obj) {
         Address::NULL => Address::NULL,
         obj => match get_first_instance(&process,version,obj) {
             Address::NULL => Address::NULL,
@@ -211,25 +233,25 @@ pub fn get_obj_inst(process : &Process, version : EngineVersion, objMap : &HashM
     }
 }
 
-pub fn get_obj_var<T: bytemuck::Pod + Default>(process : &Process, version : EngineVersion, objMap : &HashMap<String,Address>, stringsList : &HashMap<u32,String>, _obj : &str, name : &str) -> T {
-    get_inst_var::<T>(&process,version,stringsList,get_obj_inst(process,version,objMap,_obj),name)
+pub fn get_obj_var<T: bytemuck::Pod + Default>(process : &Process, version : EngineVersion, _obj : &str, name : &str) -> T {
+    get_inst_var::<T>(&process,version,get_obj_inst(process,version,_obj),name)
 }
 
-pub fn get_obj_str<const len : usize>(process : &Process, version : EngineVersion, objMap : &HashMap<String,Address>, stringsList : &HashMap<u32,String>, _obj : &str, name : &str) -> ArrayCString<len> {
-    let inst = get_obj_inst(process,version,objMap,_obj);
+pub fn get_obj_str<const len : usize>(process : &Process, version : EngineVersion, _obj : &str, name : &str) -> ArrayCString<len> {
+    let inst = get_obj_inst(process,version,_obj);
     let Ok(finder) = VarFinder::try_new(process, version, inst) else {
         return ArrayCString::<len>::default();
     };
-    let ptr = finder.getVarPtr(process, stringsList, name);
+    let ptr = finder.getVarPtr(process, name);
     process.read_pointer_path(ptr, verPs(version), &[0x0,0x0,0x0]).unwrap_or_default()
 }
 
-pub fn check_text(process : &Process, version : EngineVersion, stringsList: &HashMap<u32, String>, writer : Address, en : &str, jp : &str) -> bool {
+pub fn check_text(process : &Process, version : EngineVersion, writer : Address, en : &str, jp : &str) -> bool {
     let instVec = get_all_instances(process, version, writer);
     if instVec.len() == 0 { return false; }
     for instance in instVec {
         let Ok(finder) = VarFinder::try_new(&process,version,instance) else { continue; };
-        let txt = finder.readStr::<128>(&process,&stringsList,"mystring");
+        let txt = finder.readStr::<128>(&process,"mystring");
         if txt.matches(en) || txt.matches(jp) {
             return true;
         }
@@ -252,13 +274,12 @@ pub fn read_setting(key : &str) -> bool {
     }
 }
 
-pub const fn arr_pos(i : u64) -> u64 { i * 0x10 }
-
-pub fn start(auto_start : &AutoStart, splits : &mut HashSet<String>, item_tracker : &mut HashSet<Item>) {
+pub fn start(auto_start : &AutoStart, splits : &mut HashSet<String>) {
     match auto_start {
         AutoStart::AutoReset => {
             splits.clear();
             item_tracker.clear();
+            title_tracker.clear();
             timer::reset();
             timer::start();
         }
@@ -322,7 +343,7 @@ impl<T: Clone + bytemuck::Pod> PathTrack<T> {
     }
 }
 
-pub fn global_setup(process : &Process, DELTARUNE : Address, version : EngineVersion, ps : PointerSize) -> Result<LongTermVarReader,asr::Error> {
+pub fn global_setup(process : &Process, DELTARUNE : Address, version : EngineVersion, ps : PointerSize) -> Result<GlobalReader,asr::Error> {
     let globalAddr = process.read_pointer(DELTARUNE.add(match version {
                 GMS2_v2_2_0 => 0x49C3E0, //0x48E5DC,
                 GMS2_2022_1 => 0x6FCF38,
@@ -332,7 +353,7 @@ pub fn global_setup(process : &Process, DELTARUNE : Address, version : EngineVer
             }),ps)?;
     match version {
         //GMS2_v2_2_0 => LongTermVarReader::try_new_SP_global(&process,globalAddr),
-        GMS2_2022_1|GMS2_2022_2 => LongTermVarReader::try_new_demo_global(&process,version,globalAddr),
-        _ => LongTermVarReader::try_new(&process,version,globalAddr),
+        GMS2_2022_1|GMS2_2022_2 => GlobalReader::try_new_demo_global(&process,version,globalAddr),
+        _ => GlobalReader::try_new(&process,version,globalAddr),
     }
 }

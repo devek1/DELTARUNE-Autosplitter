@@ -6,16 +6,20 @@ use asr::{
     signature::Signature, string::ArrayCString, time_util::Instant,
     timer::{self, TimerState}, watcher::{Pair, Watcher}
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use self::{EngineVersion::*, GameVersion::*};
+use lazy_static::lazy_static;
+use dashmap::{DashMap, DashSet};
 
 mod settings;
 mod helpers;
 mod item_tracking;
+mod title_tracking;
 
 use settings::*;
 use helpers::*;
-use item_tracking::{*,ItemType::{Weapon,Armor,KeyItem,ItemLW}};
+use title_tracking::*;
+use item_tracking::{*};
 
 asr::async_main!(stable);
 
@@ -28,7 +32,8 @@ enum GameVersion {
     D119, //latest Demo version on Steam and only version on Itch.io
     Ch4_v102, //for Ch3 and hypothetical patch-swap runs (Tenna fast static)
     Ch5_v244, //for All Items and literal-ASC (JusticeAxe exploit. Note that the ASC category on the boards doesn't allow using this exploit)
-    Ch5_v247 //currently latest version
+    Ch5_v247, //last version with Fox Tech
+    Ch5_v250, //currently latest version
 }
 
 //NOTE: LTS 2022.0 branched from Monthly 2022.9, so LTS 2022.0.__ is strictly newer than Monthly 2022.2
@@ -37,12 +42,22 @@ enum GameVersion {
 #[derive(Copy,Clone)]
 enum EngineVersion {
     GMS2_v2_2_0, //SURVEY_PROGRAM
+    //Early Ch1+2 demo versions (up to 1.07) were on GMS2 v2.3.2+. Versions 1.001-1.004 all definitely used one runtime version, SteamDB claims that 1.0.5, 1.06 and 1.07 each used a unique one but it also falsely claims that for v1.09 and v1.10
     GMS2_2022_1, //Demo 1.09 and 1.10 (presumably also 1.08)
     GMS2_2022_2, //Demo 1.15 (presumably the whole 1.12-1.15 branch)
     GM_LTS2022_0_3_99, //Demo 1.19 and Ch1-4 v1.02 (everything from Demo 1.19 [potentially even back to 1.17 or 1.16] to Ch1-4 v1.04)
-    GM_LTS2022_0_3_104, //Ch1-5 v244 and v247 (everything from Ch1-4 v1.05 beta to now)
+    GM_LTS2022_0_3_104, //Ch1-5 v244/v247/v250 (everything from Ch1-4 v1.05 beta to now)
 }
 
+lazy_static!{
+    pub static ref varNames: DashMap<u32,String> = DashMap::<u32,String>::new();
+    pub static ref objs: DashMap<String,Address> = DashMap::<String,Address>::new();
+    pub static ref globalPtrs: DashMap<String,Address> = DashMap::<String,Address>::new();
+    pub static ref item_tracker: DashSet<Item> = DashSet::<Item>::new();
+    pub static ref title_tracker: DashSet<Title> = DashSet::<Title>::new();
+}
+
+//static mut proc : Mutex<Option<Process>> = Mutex::new(None);
 
 
 const n : &[u64] = &[0];
@@ -50,19 +65,16 @@ const n : &[u64] = &[0];
 const ps64: PointerSize = PointerSize::Bit64;
 const ps32: PointerSize = PointerSize::Bit32;
 
-const IL_Pauses : [&str;5] = ["ch1_ending","ch2_ending_il","ch3_ending","ch4_ending_il","ch5_ending_src"];
-const AC_Pauses : [&str;5] = ["ch1_ending","ch2_ending_ac","ch3_ending","ch4_ending","ch5_ending_src"]; //Ch5 ending in this set will change after Ch6 release
-const OST_Pauses : [&str;5] = ["ch1_ending_ost","ch2_ending_ac","ch3_ending_ost","ch4_ending_ost","ch5_ending_src"];
-const OST_LateCh2_Pauses : [&str;5] = ["ch1_ending_ost","ch2_ending_ost","ch3_ending","ch4_ending_ost","ch5_ending_src"];
-
-
+const IL_Pauses : [&str;6] = ["ch1_ending","ch2_ending_il","ch3_ending","ch4_ending_il","ch5_ending_src","ch5_sideb"];
+const AC_Pauses : [&str;6] = ["ch1_ending","ch2_ending_ac","ch3_ending","ch4_ending","ch5_ending_src","ch5_sideb"]; //5A ending in this set will change after Ch6 release
+const OST_Pauses : [&str;6] = ["ch1_ending_ost","ch2_ending_ac","ch3_ending_ost","ch4_ending_ost","ch5_ending_src","ch5_sideb"];
+const OST_LateCh2_Pauses : [&str;6] = ["ch1_ending_ost","ch2_ending_ost","ch3_ending","ch4_ending_ost","ch5_ending_src","ch5_sideb"];
 
 async fn main() {
     // TODO: Set up some general state and settings.
     let mut settings = Settings::register();
     let mut splits = HashSet::<String>::new();
-    let item_map = HashMap::from(item_map_init_array());
-    let mut item_tracker = HashSet::<Item>::new();
+    //let mut item_tracker = HashSet::<Item>::new();
     asr::set_tick_rate(60.0);
 
     asr::print_message("Hello, World!");
@@ -77,6 +89,9 @@ async fn main() {
 
         process
             .until_closes(async {
+                globalPtrs.clear();
+                //globalNums.clear();
+                //globalArrVals.clear();
                 let attached = Instant::now();
                 let (DELTARUNE, _) = process.wait_module_range("DELTARUNE.exe").await;
                 let module_size = pe::read_size_of_image(&process, DELTARUNE).unwrap_or_default();
@@ -139,6 +154,10 @@ async fn main() {
                     "80a63475ef69529b612f9dca75af4cc5" | //v247 30tbps
                     "3217f3bfe82c3e4aa8ee2e9e3a4f4e14" | //v247 Item Tracker
                     "21cdd09eeadbcc77535ab2bb3412259a" => Ch5_v247, //v247 OST tracker
+                    "1f00145d681f830f1249d9493ba8f579" |
+                    "c4af126cf2e678e8cb06151cd007804b" |
+                    "46050610dfb4df977e21967d1a1d9fa8" |
+                    "14d163e00a840e22b16369862264146d" => Ch5_v250,
                     _ => Invalid,
                 };
                 timer::set_variable("Game Version", match game_version {
@@ -151,6 +170,7 @@ async fn main() {
                     Ch4_v102 => "Ch1-4 v1.02",
                     Ch5_v244 => "Ch1-5, Ch5 v0.0.244",
                     Ch5_v247 => "Ch1-5, Ch5 v0.0.247",
+                    Ch5_v250 => "Ch1-5, Ch5 v0.0.250",
                 });
                 if !settings.allow_unsupported_version && matches!(game_version,Invalid) {
                     loop {
@@ -261,12 +281,14 @@ async fn main() {
                 };
 
                 //let stringsListTiming = Instant::now();
-                let mut stringsList = HashMap::<u32,String>::new();
+                //let mut varNames = HashMap::<u32,String>::new();
+                varNames.clear();
                 retry(|| -> Option<bool> {
                     let Ok(sListPtr) = process.read_pointer(DELTARUNE.add(stringsListOffset),ps) else { return None; };
                     //the number of strings is always found at -0xC from the main array pointer regardless of 32-bit/64-bit
                     let Ok(strNum) = process.read::<u32>(DELTARUNE.add(stringsListOffset - 0xC)) else { return None; }; 
                     asr::print_message(format!("StringsList length: {}",strNum).as_str());
+                    if strNum < 400 {return None;}
                     for i in 0..strNum {
                         let Ok(namePtr) = process.read_pointer(sListPtr.add(psBytes*i as u64), ps) else {
                             continue;
@@ -275,7 +297,7 @@ async fn main() {
                         let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();
                         let name = _name.validate_utf8().unwrap_or_default();
                         if name != "" {
-                            stringsList.insert(i + match version {GMS2_v2_2_0=>0,_=>100000}, name.to_string());
+                            varNames.insert(i + match version {GMS2_v2_2_0=>0,_=>100000}, name.to_string());
 
                             /*if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
                                 asr::print_limited::<64>(&format_args!("{} found at StringID {}",name,i))
@@ -304,11 +326,11 @@ async fn main() {
                             }
                         }
                     }
-                    if (stringsList.len() as u32) < (strNum * 3 / 4) { return None; }
+                    if (varNames.len() as u32) < (strNum * 3 / 4) { return None; }
                     return Some(true);
                 }).await;
                 //asr::print_message(format!("StringsList read in {} seconds",stringsListTiming.elapsed().as_secs_f64()).as_str());
-                asr::print_message(format!("Number of strings: {}",stringsList.len()).as_str());
+                asr::print_message(format!("Number of strings: {}",varNames.len()).as_str());
                 //asr::print_message(format!("plot's String index is {}",string_ids["plot"]).as_str());s
 
                 //temporary unreachables for pointers I haven't found yet
@@ -332,7 +354,8 @@ async fn main() {
                     _ => unreachable!()
                 };
 
-                let mut obj_addr_map = HashMap::<String,Address>::new();
+                //let mut objs = HashMap::<String,Address>::new();
+                objs.clear();
                 retry(|| -> Option<bool> {
                     //for testing we temporarily skip object reading in versions that don't have offsets found yet
                     let Ok(objArrBase) = process.read_pointer(DELTARUNE.add(objArrOffset),ps) else { return None; };
@@ -352,24 +375,24 @@ async fn main() {
                                 /*if matches!(name,"obj_writer"|"obj_moneydisplay"|"DEVICE_NAMER"|"obj_berdly_smoke") {
                                     asr::print_message(format!("{} found at index {} layer {}, address {}",name,i,_layer,objAddr).as_str());
                                 }*/
-                                obj_addr_map.insert(name.to_string(),objAddr);
+                                objs.insert(name.to_string(),objAddr);
                             }
                             objAddr = process.read_pointer(objAddr,ps).unwrap_or_default();
                         }
                     }
                     //if a significant amount of objects were missed
-                    if (obj_addr_map.len() as u32) < (objNum * 3 / 4) { obj_addr_map.clear(); return None; }
+                    if (objs.len() as u32) < (objNum * 3 / 4) { objs.clear(); return None; }
                     return Some(true);
                 }).await;
-                asr::print_message(format!("objs successfully found: {}",obj_addr_map.len()).as_str());
+                asr::print_message(format!("objs successfully found: {}",objs.len()).as_str());
 
                 
                 let mantleOutro_instCount = match chapter {
-                    3 => Address::from(process.read_pointer_path::<u64>(get_obj(&obj_addr_map,"obj_shadow_mantle_enemy_outro"),ps,&[0x18,0x78]).unwrap_or_default()),
+                    3 => Address::from(process.read_pointer_path::<u64>(get_obj("obj_shadow_mantle_enemy_outro"),ps,&[0x18,0x78]).unwrap_or_default()),
                     _ => Address::NULL
                 };
                 let crtEnd_instCount = match chapter {
-                    5 => Address::from(process.read_pointer_path::<u64>(get_obj(&obj_addr_map,"obj_LW20W_end"),ps,&[0x18,0x78]).unwrap_or_default()),
+                    5 => Address::from(process.read_pointer_path::<u64>(get_obj("obj_LW20W_end"),ps,&[0x18,0x78]).unwrap_or_default()),
                     _ => Address::NULL
                 };
                 /*let mut objs = String::from("");
@@ -442,7 +465,7 @@ async fn main() {
                     _ => name.to_owned()
                 };
 
-                let objVar = |obj : &str, var : &str| get_obj_var(&process, version, &obj_addr_map, &stringsList, obj, var);
+                let objVar = |obj : &str, var : &str| get_obj_var(&process, version, obj, var);
 
                 let arrItem = | arr : Address, index : u64 | process.read::<f64>(arr.add(index*0x10)).unwrap_or_default();
                 
@@ -455,7 +478,7 @@ async fn main() {
                     false
                 };
 
-                let textCheck = |en,jp| check_text(&process,version,&stringsList,get_obj(&obj_addr_map,"obj_writer"),en,jp);
+                let textCheck = |en,jp| check_text(&process,version,get_obj("obj_writer"),en,jp);
 
 
                 let mut global_effectiveness_retry_timer: i32 = 5;
@@ -471,7 +494,7 @@ async fn main() {
                         continue;
                     }
 
-                    if chapter != 0 && global.cache.is_empty() {
+                    if chapter != 0 && globalPtrs.is_empty() {
                         global_effectiveness_retry_timer -= 1;
                         if global_effectiveness_retry_timer <= 0 {
                             global_effectiveness_retry_timer = 5;
@@ -479,13 +502,17 @@ async fn main() {
                         }
                     }
 
+                    let globPtr = |name| global.ptr(&process,name);
+                    let globVal = |name| global.num(&process,name);
+                    let globArrVal = |name,index| global.arrNum(&process,name,index);
+
 
                     /*if chapter > 2 && flag0Ptr.is_null() {
                         flag0Ptr = get_array_element0(&process,ps,&global_ptr(&process,&stringsList,&globalFinder,&mut globalPtrs,"flag"));
                     }*/
 
                     if matches!(version,GMS2_2022_1|GMS2_2022_2) {
-                        chapter = _chapter.update_infallible(global.num(&process,&stringsList,"chapter")).current as i32;
+                        chapter = _chapter.update_infallible(globVal("chapter")).current as i32;
                     }
                     timer::set_variable_int("Chapter",chapter);
 
@@ -510,8 +537,12 @@ async fn main() {
                         #![cfg(debug_assertions)]
                         timer::set_variable("Room Name",cur_room);
 
-                        timer::set_variable("text",get_obj_str::<128>(&process, version, &obj_addr_map, &stringsList, "obj_writer", "mystring").validate_utf8().unwrap_or_default()); //
-                        timer::set_variable("writer addr",format!("{}",obj_addr_map.get(&"obj_writer".to_owned()).unwrap_or(&Address::NULL)).as_str());
+                        timer::set_variable("text",get_obj_str::<128>(&process, version, "obj_writer", "mystring").validate_utf8().unwrap_or_default()); //
+                        timer::set_variable("date text 2",get_obj_str::<128>(&process, version, "obj_date_controller", "second_text").validate_utf8().unwrap_or_default()); //
+                        timer::set_variable_float("date timer",get_obj_var::<f64>(&process, version, "obj_date_controller", "timer"));
+                        timer::set_variable_float("date con",get_obj_var::<f64>(&process, version, "obj_date_controller", "con"));
+
+                        timer::set_variable("writer addr",&format!("{}",get_obj("obj_writer")));
                     }
 
                     //timer::set_variable_float("Plot",globalFinder.readNum::<f64>(&process, &stringsList, "plot"));
@@ -523,6 +554,7 @@ async fn main() {
                         //tempVar = 0;
                         if !splits.is_empty() { splits.clear(); }
                         if !item_tracker.is_empty() { item_tracker.clear(); }
+                        if !title_tracker.is_empty() { title_tracker.clear(); }
                     }
 
                     match chapter {
@@ -531,7 +563,7 @@ async fn main() {
                         1 => {
                             if prev_room != cur_room && cur_room == "PLACE_CONTACT" {
                                 //tempVar = 0;
-                                start(&settings.auto_start,&mut splits,&mut item_tracker);
+                                start(&settings.auto_start,&mut splits);
                             }
                         }
                         5 if prev_room == "PLACE_CONTACT" => {
@@ -541,13 +573,13 @@ async fn main() {
                                 if cur_room == "PLACE_MENU"
                                 {
                                     if namer_event.current == 75.0 && namer_event.old == 74.0 {
-                                        start(&settings.auto_start,&mut splits,&mut item_tracker);
+                                        start(&settings.auto_start,&mut splits);
                                     }
                                 }
                             }
                             if !matches!(settings.ch5_start_on_prev,Ch5StartOnPrev::No) {
                                 if prev_room == "PLACE_MENU" && cur_room == "room_krisroom" && namer_event.old != 75.0 {
-                                    start(&settings.auto_start,&mut splits,&mut item_tracker);
+                                    start(&settings.auto_start,&mut splits);
                                 }
                             }
                         }
@@ -555,7 +587,7 @@ async fn main() {
                             let namer_event = _namer.update_infallible(objVar("DEVICE_NAMER","EVENT")); //get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT")
                             timer::set_variable_float("Namer Event",namer_event.current);
                             if namer_event.current == 75.0 && namer_event.old != 75.0 {
-                                start(&settings.auto_start,&mut splits,&mut item_tracker);
+                                start(&settings.auto_start,&mut splits);
                             }
                         }
                         _ => ()
@@ -565,9 +597,14 @@ async fn main() {
 
                     // if we're not in the middle of a run, no reason to do anything not related to autostart (note that IGT pauses don't affect whether the timer state counts as running or paused)
                     if timer::state() == TimerState::Running && chapter > 0 {
+                        let fighting = _fighting.update_infallible(globVal("fighting"));
+                        let plot = _plot.update_infallible(globVal("plot"));
+                        let choice = _choice.update_infallible(globVal("choice"));
+                        let msc = _msc.update_infallible(globVal("msc"));
+                        let darkzone = _darkzone.update_infallible(globVal("darkzone"));
                         if settings.item_tracking && cur_room != "PLACE_MENU" {
 
-                            let mut itemCheck = |itemType,inv,offset| item_check_slot(&process,&mut item_tracker,&item_map,chapter,itemType,global.ptr(&process,&stringsList,inv).add(offset));
+                            let itemCheck = |itemType,inv,offset| item_check_slot(&process,chapter,darkzone.current,itemType,global.ptr(&process,inv).add(offset));
                             /*match darkzone.current {
                                 1.0 => {
                                     for i in 0..12 as u64 {
@@ -594,43 +631,50 @@ async fn main() {
                                 0.0 => {
                                     for i in 0..12 as u64 {
                                             let offset = i * 0x10;
-                                            item_check_slot(&process,&mut item_tracker,&item_map,chapter,ItemLW,globPtr("litem[0]").add(offset));
+                                            item_check_slot(&process,&mut item_tracker,&item_map,chapter,"ItemLW",globPtr("litem[0]").add(offset));
                                     }
                                 }
                                 _ => () //should always be 1 or 0
                             }*/
+                            itemCheck("ItemLW","lweapon",0);
+                            itemCheck("ItemLW","larmor",0);
+                            if darkzone.current == 1.0 {
+                                for charslot in 0..=2 {
+                                    let chara = globArrVal("char[0]",charslot) as u64;
+                                    if chara == 0 {continue;}
+                                    itemCheck("Weapon","charweapon[0]",chara);
+                                    itemCheck("Armor","chararmor1[0]",chara);
+                                    itemCheck("Armor","chararmor2[0]",chara);
+                                }
+                            }
                             for offset in (0..arr_pos(12)).step_by(0x10) {
                                 if offset < arr_pos(8) {
-                                    itemCheck(ItemLW,"litem[0]",offset);
+                                    itemCheck("ItemLW","litem[0]",offset);
                                 }
-                                itemCheck(ItemType::Item,"item[0]",offset);
-                                itemCheck(KeyItem,"keyitem[0]",offset);
-                                itemCheck(Weapon,"weapon[0]",offset);
-                                itemCheck(Armor,"armor[0]",offset);
+                                itemCheck("Item","item[0]",offset);
+                                itemCheck("KeyItem","keyitem[0]",offset);
+                                itemCheck("Weapon","weapon[0]",offset);
+                                itemCheck("Armor","armor[0]",offset);
                                 if chapter > 1 {
-                                    itemCheck(ItemType::Item,"pocketitem[0]",offset);
+                                    itemCheck("Item","pocketitem[0]",offset);
                                 }
                             }
                             if chapter > 1 {
                                 for offset in (arr_pos(12)..arr_pos(48)).step_by(0x10) {
-                                    itemCheck(Weapon,"weapon[0]",offset);
-                                    itemCheck(Armor,"armor[0]",offset);
+                                    itemCheck("Weapon","weapon[0]",offset);
+                                    itemCheck("Armor","armor[0]",offset);
                                     if offset < match chapter { 2|3 => arr_pos(24), 4 => arr_pos(36), 5 => arr_pos(48), _ => unreachable!()} {
-                                        itemCheck(ItemType::Item,"pocketitem[0]",offset);
+                                        itemCheck("Item","pocketitem[0]",offset);
                                     }
                                 }
                             }
                             let items_obtained = item_tracker.len();
                             timer::set_variable("Items",format!("{}/160",items_obtained).as_str())
                         }
-
-
-                        let mut globVal = |name| global.num(&process,&stringsList,name);
-                        let fighting = _fighting.update_infallible(globVal("fighting"));
-                        let plot = _plot.update_infallible(globVal("plot"));
-                        let choice = _choice.update_infallible(globVal("choice"));
-                        let msc = _msc.update_infallible(globVal("msc"));
-                        let darkzone = _darkzone.update_infallible(globVal("darkzone"));
+                        if settings.title_tracking && !matches!(cur_room,"PLACE_MENU"|"ROOM_INITIALIZE"|"PLACE_LOGO") {
+                            titles_check(&process, version, &global, cur_room);
+                            timer::set_variable("Titles",&format!("{}/53",title_tracker.len()));
+                        }
 
                         //the next few vars are not detected for SP
                         let snd = snd_ptr.update_value(&process);
@@ -646,10 +690,6 @@ async fn main() {
                             timer::set_variable("snd",snd.current.validate_utf8().unwrap_or_default());
                         }
 
-                        //we don't really want to be constantly tracking text, we want to only check it in rooms with text splits
-                        //let text = text_ptr1.update_value(&process);
-                        //timer::set_variable("text",text.current.validate_utf8().unwrap_or_default());
-
                         match chapter {
                             // Chapter 1 logic
                             1 => {
@@ -662,7 +702,7 @@ async fn main() {
                                 });
 
                                 let text_check = _text_check.update_infallible(match cur_room {
-                                    "room_krisroom" => check_text(&process, version, &stringsList, get_obj(&obj_addr_map, &chapter1ify("obj_writer")),
+                                    "room_krisroom" => check_text(&process, version, get_obj(&chapter1ify("obj_writer")),
                                                                   r"* (You decided to go to bed.)/%",
                                                                   r"＊ (ねむることにした)/%"),
                                     _ => false
@@ -801,8 +841,8 @@ async fn main() {
                             3 => {
 
                                 let flag = _flag.update_infallible(match cur_room {
-                                    "room_dw_ch3_man" => process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(930))).unwrap_or_default(),
-                                    "room_dw_snow_zone" => process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(1047))).unwrap_or_default(),
+                                    "room_dw_ch3_man" => globArrVal("flag[0]",930),
+                                    "room_dw_snow_zone" => globArrVal("flag[0]",1047),
                                     _ => 0.0
                                 });
                                 let mantle_outro = _instExist.update_infallible(match cur_room {
@@ -958,7 +998,7 @@ async fn main() {
                                         ("room_dw_fcastle_foyer","room_dw_fcastle_cafe") => "ch5_enter_right",
                                         ("room_dw_fcastle_right_endingscene","room_dw_fcastle_foyer") => "ch5_exit_right",
                                         ("room_dw_fcastle_foyer","room_dw_fcastle_asgore") => "ch5_beanstalk",
-                                        ("room_shop","room_dw_cliff_shop") if arrCheck(global.ptr(&process,&stringsList,"keyitem[0]"),
+                                        ("room_shop","room_dw_cliff_shop") if arrCheck(globPtr("keyitem[0]"),
                                                                      32.0, 0, 11) => "ch5_pink_shop",
                                         ("room_dw_fcastle_top_pinkdoor","room_dw_fcastle_pinkroom") => "ch5_pink_door",
                                         ("room_dw_fcastle_pinkroom","room_dw_pink_encounter") => "ch5_pink_start",
@@ -972,8 +1012,7 @@ async fn main() {
                                         ("room_dw_fcastle_flowerydash","room_dw_post_flowery_battle") => "ch5_omega_flowery",
                                         ("room_dw_fcastle_top_fountain","room_dw_post_fountain_close") => "ch5_fountain1",
                                         ("room_cc_fountain","room_flowershop_2f") => "ch5_fountain2",
-                                        (_,"room_schooldoor") if process.read::<f64>(global.ptr(&process,&stringsList,"flag[0]").add(arr_pos(1324))).unwrap_or_default() == 3.0
-                                        => "ch5_ending_completion_data",
+                                        (_,"room_schooldoor") if globArrVal("flag[0]",1324) == 3.0 => "ch5_ending_completion_data",
                                         ("room_schooldoor","room_ed") => "ch5_ending_src",
                                         _ => ""
                                     },false);
@@ -982,7 +1021,7 @@ async fn main() {
                                         "room_dw_garden_aqua" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch5_aqua_end",
                                         "room_man" if choice.bytes_changed_from_to(&-1.0,&0.0) => "ch5_egg",
                                         "room_dw_cliff_sethaqua_battle" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch5_beat_seth_aqua",
-                                        "room_dw_pink_encounter" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch5_pink_end",
+                                        "room_dw_pink_encounter" if fighting.current == 1.0 && objVar("obj_date_controller","con") == 8.0 && objVar("obj_date_controller","timer") >= 10.0 => "ch5_pink_end",
                                         "room_dw_fcastle_flowery" if fighting.bytes_changed_from_to(&0.0,&1.0) => "ch5_start_flowery",
                                         "room_flowershop_2f" if plot.bytes_changed_to(&560.0) => "ch5_seed_packets",
                                         "room_mid_town" if text_check.changed_to(&true) => "ch5_bread",
