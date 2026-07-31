@@ -305,6 +305,7 @@ async fn main() {
                             timer::set_variable_int("last real string index",i);*/
                         }
                     }
+                    if strNum != process.read::<u32>(DELTARUNE.add(stringsListOffset - 0xC)).unwrap_or_default() { return None; }
                     //in SP, the pointers to names of global variables are in a separate array from the ones for other objects' variables, but there is no overlap so we can just read both into one HashMap
                     if matches!(version,GMS2_v2_2_0) {
                         let Ok(sListPtr2) = process.read_pointer(DELTARUNE.add(stringsListOffset-0x10),ps) else { return None; };
@@ -380,6 +381,7 @@ async fn main() {
                             objAddr = process.read_pointer(objAddr,ps).unwrap_or_default();
                         }
                     }
+                    if objNum != process.read::<u32>(objArrBase.add(objNumOff)).unwrap_or_default() {return None;}
                     //if a significant amount of objects were missed
                     if (objs.len() as u32) < (objNum * 3 / 4) { objs.clear(); return None; }
                     return Some(true);
