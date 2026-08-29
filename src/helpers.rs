@@ -74,7 +74,7 @@ impl VarFinder {
         Address::NULL
     }
 
-    //Immediately read simple value from a variable, this is used to read numeric variable values from instances of objects without needing
+    //Immediately read simple value from a variable, this is used to read numeric variable values from instances of objects
     //not strictly limited to numbers, but most other types require further pointers
     pub fn readNum<T: bytemuck::Pod + Default>(&self, process: &Process, name: &str) -> T {
         let ptr = self.getVarPtr(process, name);

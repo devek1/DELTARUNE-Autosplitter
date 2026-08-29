@@ -33,7 +33,8 @@ enum GameVersion {
     Ch4_v102, //for Ch3 and hypothetical patch-swap runs (Tenna fast static)
     Ch5_v244, //for All Items and literal-ASC (JusticeAxe exploit. Note that the ASC category on the boards doesn't allow using this exploit)
     Ch5_v247, //last version with Fox Tech
-    Ch5_v250, //currently latest version
+    Ch5_v250, //last version with Bagel Overflow
+    Ch5_v253, //current latest version
 }
 
 //NOTE: LTS 2022.0 branched from Monthly 2022.9, so LTS 2022.0.__ is strictly newer than Monthly 2022.2
@@ -100,12 +101,12 @@ async fn main() {
 
                 let runner_md5 = &format!("{:X}", md5::compute(read(&path).unwrap_or_default()));
                 timer::set_variable("Runner MD5", runner_md5);
-                let version = match runner_md5.to_lowercase().as_str() {
-                    "4d09627e1fa123d12ddf1a496c489f73" => GMS2_v2_2_0,
-                    "dcfb86f7a80d9906bbbafa1b2c224848" => GMS2_2022_1,
-                    "a9db8b7fb6333b5e267f574f46076b3f" => GMS2_2022_2,
-                    "14af94e0435eb4cbe3bb5a03ab4218c4" => GM_LTS2022_0_3_99,
-                    "7bf3cccc2e54481ced3a149e1a083684" => GM_LTS2022_0_3_104,
+                let version = match runner_md5.as_str() {
+                    "4D09627E1FA123D12DDF1A496C489F73" => GMS2_v2_2_0,
+                    "DCFB86F7A80D9906BBBAFA1B2C224848" => GMS2_2022_1,
+                    "A9DB8B7FB6333B5E267F574F46076B3F" => GMS2_2022_2,
+                    "14AF94E0435EB4CBE3BB5A03AB4218C4" => GM_LTS2022_0_3_99,
+                    "7BF3CCCC2E54481CED3A149E1A083684" => GM_LTS2022_0_3_104,
                     _ => {
                         timer::set_variable("Engine Version","Unrecognized");
                         timer::set_variable("Game Version","invalid or unrecognized");
@@ -127,37 +128,41 @@ async fn main() {
                 let data_md5 = &format!("{:X}", md5::compute(read(path).unwrap_or_default()));
                 timer::set_variable("data.win MD5", data_md5);
                 
-                let game_version = match data_md5.to_lowercase().as_str() {
-                    "a88a2db3a68c714ca2b1ff57ac08a032" | //SP-EN vanilla
-                    "047c11435b1c592ec731bff3b9c5b0cf" | //SP-EN 30tbps
-                    "22008370824a37baef8948127963c769" | //SP-JP vanilla
-                    "e05433fe679bc91e3809c1138e3a8ea1" => SP, //SP-JP 30tbps
-                    "616c5751ac9fc584af250f1b04474afd" | //demo 1.09 vanilla Itch
-                    "05689183497e58838e99b897f2e0e6ac" | //demo 1.09 30tbps Itch
-                    "267a8abe468d824222810201f00003be" | //demo 1.09 vanilla Steam
-                    "272a16964597ed6dc8d2393ed051d3ce" => D109, // demo 1.09 30tbps Steam
-                    "5fbe01f2bc1c04f45d809ffd060ac386" | //demo 1.10 vanilla Itch
-                    "a37c77a4310d2d6a6c2af18294aaae7a" | //demo 1.10 30tbps Itch
-                    "cd77a63d7902990dbc704fe32b30700a" | //demo 1.10 vanilla Steam
-                    "758c8862f22f778fdeafe25fbcd1f4ec" => D110, //demo 1.10 30tbps Steam
-                    "ed4568bab864166bfd6322ceeb3fb544" | //demo 1.15 vanilla
-                    "6bd6d1381c194c0f456b184cb48d132d" => D115, //demo 1.15 30tbps
-                    "7ad299a8b33fa449e20edfe0fededdb2" | //demo 1.19 vanilla
-                    "fd0857e6a3af3aa74e5e00f15aea5224" => D119, //demo 1.19 30tbps
-                    "b5ef0eec9554c491777d6c4e93e0df76" | //v1.02 vanilla
-                    "40a8185886a8a1a2be996bc57de3d916" => Ch4_v102, //v1.02 30tbps
-                    "ddedbbd10ff129b49c64dbefaa763c6a" | //v244 vanilla
-                    "4a9c69b42e442b673395b3253f292f17" | // v244 30 TBPS mod
-                    "42b66b41b6cea12fb54219e9d31e5dc8" | // v244 Item tracker mod
-                    "d0420c09a5debd6176ea24a1fe1ee3e3" => Ch5_v244, // OST% tracker mod
-                    "908643b7593b000f5b6c61bb484d086a" | //v247 vanilla
-                    "80a63475ef69529b612f9dca75af4cc5" | //v247 30tbps
-                    "3217f3bfe82c3e4aa8ee2e9e3a4f4e14" | //v247 Item Tracker
-                    "21cdd09eeadbcc77535ab2bb3412259a" => Ch5_v247, //v247 OST tracker
-                    "1f00145d681f830f1249d9493ba8f579" |
-                    "c4af126cf2e678e8cb06151cd007804b" |
-                    "46050610dfb4df977e21967d1a1d9fa8" |
-                    "14d163e00a840e22b16369862264146d" => Ch5_v250,
+                let game_version = match data_md5.as_str() {
+                    "A88A2DB3A68C714CA2B1FF57AC08A032" | //SP-EN vanilla
+                    "047C11435B1C592EC731BFF3B9C5B0CF" | //SP-EN 30tbps
+                    "22008370824A37BAEF8948127963C769" | //SP-JP vanilla
+                    "E05433FE679BC91E3809C1138E3A8EA1" => SP, //SP-JP 30tbps
+                    "616C5751AC9FC584AF250F1B04474AFD" | //demo 1.09 vanilla Itch
+                    "05689183497E58838E99B897F2E0E6AC" | //demo 1.09 30tbps Itch
+                    "267A8ABE468D824222810201F00003BE" | //demo 1.09 vanilla Steam
+                    "272A16964597ED6DC8D2393ED051D3CE" => D109, // demo 1.09 30tbps Steam
+                    "5FBE01F2BC1C04F45D809FFD060AC386" | //demo 1.10 vanilla Itch
+                    "A37C77A4310D2D6A6C2AF18294AAAE7A" | //demo 1.10 30tbps Itch
+                    "CD77A63D7902990DBC704FE32B30700A" | //demo 1.10 vanilla Steam
+                    "758C8862F22F778FDEAFE25FBCD1F4EC" => D110, //demo 1.10 30tbps Steam
+                    "ED4568BAB864166BFD6322CEEB3FB544" | //demo 1.15 vanilla
+                    "6BD6D1381C194C0F456B184CB48D132D" => D115, //demo 1.15 30tbps
+                    "7AD299A8B33FA449E20EDFE0FEDEDDB2" | //demo 1.19 vanilla
+                    "FD0857E6A3AF3AA74E5E00F15AEA5224" => D119, //demo 1.19 30tbps
+                    "B5EF0EEC9554C491777D6C4E93E0DF76" | //v1.02 vanilla
+                    "40A8185886A8A1A2BE996BC57DE3D916" => Ch4_v102, //v1.02 30tbps
+                    "DDEDBBD10FF129B49C64DBEFAA763C6A" | //v244 vanilla
+                    "4A9C69B42E442B673395B3253F292F17" | // v244 30 TBPS mod
+                    "42B66B41B6CEA12FB54219E9D31E5DC8" | // v244 item tracker mod
+                    "D0420C09A5DEBD6176EA24A1FE1EE3E3" => Ch5_v244, // v244 OST tracker
+                    "908643B7593B000F5B6C61BB484D086A" | //v247 vanilla
+                    "80A63475EF69529B612F9DCA75AF4CC5" | //v247 30tbps
+                    "3217F3BFE82C3E4AA8EE2E9E3A4F4E14" | //v247 item tracker
+                    "21CDD09EEADBCC77535AB2BB3412259A" => Ch5_v247, //v247 OST tracker
+                    "1F00145D681F830F1249D9493BA8F579" | //v250 vanilla
+                    "C4AF126CF2E678E8CB06151CD007804B" | //v250 30tbps
+                    "46050610DFB4DF977E21967D1A1D9FA8" | //v250 item tracker
+                    "14D163E00A840E22B16369862264146D" => Ch5_v250, //v250 OST tracker
+                    "83A5A14F9B92A20F21FB9EC6C8528469" | //v253 vanilla
+                    "5B19C93D46F646F153C8A598079664F6" | //v253 30tbps
+                    "FD15DD732A67BF4A9FC55A7203C55F38" | //v253 item tracker
+                    "FA6B5F4AA8B7F3027BCD322D831EFABF" => Ch5_v253, //v253 OST tracker
                     _ => Invalid,
                 };
                 timer::set_variable("Game Version", match game_version {
@@ -168,9 +173,10 @@ async fn main() {
                     D115 => "Demo v1.15",
                     D119 => "Demo v1.19",
                     Ch4_v102 => "Ch1-4 v1.02",
-                    Ch5_v244 => "Ch1-5, Ch5 v0.0.244",
-                    Ch5_v247 => "Ch1-5, Ch5 v0.0.247",
-                    Ch5_v250 => "Ch1-5, Ch5 v0.0.250",
+                    Ch5_v244 => "Ch1-5, w/Ch5 v0.0.244",
+                    Ch5_v247 => "Ch1-5, w/Ch5 v0.0.247",
+                    Ch5_v250 => "Ch1-5, w/Ch5 v0.0.250",
+                    Ch5_v253 => "Ch1-5, w/Ch5 v0.0.253",
                 });
                 if !settings.allow_unsupported_version && matches!(game_version,Invalid) {
                     loop {
@@ -185,23 +191,11 @@ async fn main() {
                     _ => ps64
                 };
 
-                /*let varJump = match ps {
-                    ps64 => 0x10,
-                    ps32 => 0xC, //seems oddly inaccurate? it's as if the jump betweens vars is LARGER on v1.10???? (NOTE: it might just be that there are empty slots for variables)
-                    _ => unreachable!()
-                };*/
-
                 let psBytes = match ps {
                     ps64 => 0x8,
                     ps32 => 0x4,
                     _ => unreachable!()
                 };
-
-                /*let strNumOffset = match ps {
-                    ps64 => -0x18,
-                    ps32 => -0xC,
-                    _ => unreachable!()
-                };*/
 
                 let mut chapter = -1;
 
@@ -242,8 +236,8 @@ async fn main() {
                 static id_sig32 : Signature<16> = Signature::new(&"FF 35 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 50 68");
 
                 let mut room_array_addr = match ps {
-                    ps64 => array_sig64.wait_scan_process_range(&process, (DELTARUNE, module_size as u64)).await.add(5),
-                    _ => process.read_pointer(array_sig32.wait_scan_process_range(&process,(DELTARUNE, module_size as u64)).await.add(2), ps).unwrap_or_default()
+                    ps64 => array_sig64.wait_scan_process_range(&process, (DELTARUNE, module_size as u64)).await + 5,
+                    _ => process.read_pointer(array_sig32.wait_scan_process_range(&process,(DELTARUNE, module_size as u64)).await + 2, ps).unwrap_or_default()
                 };
                 room_array_addr = match ps {
                     ps64 => room_array_addr.add(process.read::<i32>(room_array_addr).unwrap_or_default() as u64 + 4),
@@ -284,17 +278,19 @@ async fn main() {
                 //let mut varNames = HashMap::<u32,String>::new();
                 varNames.clear();
                 retry(|| -> Option<bool> {
-                    let Ok(sListPtr) = process.read_pointer(DELTARUNE.add(stringsListOffset),ps) else { return None; };
+                    let Ok(sListPtr) = process.read_pointer(DELTARUNE + stringsListOffset,ps) else { return None; };
                     //the number of strings is always found at -0xC from the main array pointer regardless of 32-bit/64-bit
-                    let Ok(strNum) = process.read::<u32>(DELTARUNE.add(stringsListOffset - 0xC)) else { return None; }; 
+                    let Ok(strNum) = process.read::<u32>(DELTARUNE + (stringsListOffset - 0xC)) else { return None; }; 
                     asr::print_message(format!("StringsList length: {}",strNum).as_str());
                     if strNum < 400 {return None;}
                     for i in 0..strNum {
-                        let Ok(namePtr) = process.read_pointer(sListPtr.add(psBytes*i as u64), ps) else {
+                        /*let Ok(namePtr) = process.read_pointer(sListPtr.add(psBytes*i as u64), ps) else {
                             continue;
                         };
-                        if namePtr.is_null() {  continue; }
-                        let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();
+                        if namePtr.is_null() {  continue; }*/
+                        let Ok(_name ) = process.read_pointer_path::<ArrayCString<64>>(sListPtr,ps,&[psBytes*i as u64,0x0]) else {
+                            continue;
+                        };
                         let name = _name.validate_utf8().unwrap_or_default();
                         if name != "" {
                             varNames.insert(i + match version {GMS2_v2_2_0=>0,_=>100000}, name.to_string());
@@ -305,22 +301,25 @@ async fn main() {
                             timer::set_variable_int("last real string index",i);*/
                         }
                     }
-                    if strNum != process.read::<u32>(DELTARUNE.add(stringsListOffset - 0xC)).unwrap_or_default() { return None; }
+                    if strNum != process.read::<u32>(DELTARUNE+(stringsListOffset - 0xC)).unwrap_or_default() { return None; }
                     //in SP, the pointers to names of global variables are in a separate array from the ones for other objects' variables, but there is no overlap so we can just read both into one HashMap
                     if matches!(version,GMS2_v2_2_0) {
-                        let Ok(sListPtr2) = process.read_pointer(DELTARUNE.add(stringsListOffset-0x10),ps) else { return None; };
+                        let Ok(sListPtr2) = process.read_pointer(DELTARUNE+(stringsListOffset-0x10),ps) else { return None; };
                         //let strNum = process.read::<u32>(sListPtr.add_signed(strNumOffset)).unwrap_or_default(); //there doesn't seem to be a real length value anywhere around here
                         //asr::print_message(format!("StringsList length: {}",strNum).as_str());
                         for i in 0..strNum {
-                            let Ok(namePtr) = process.read_pointer(sListPtr2.add(psBytes*i as u64), ps) else {
+                            /*let Ok(namePtr) = process.read_pointer(sListPtr2.add(psBytes*i as u64), ps) else {
                                 continue;
                             };
                             if namePtr.is_null() {  continue; }
-                            let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();
+                            let _name = process.read::<ArrayCString<64>>(namePtr).unwrap_or_default();*/
+                            let Ok(_name ) = process.read_pointer_path::<ArrayCString<64>>(sListPtr,ps,&[psBytes*i as u64,0x0]) else {
+                                continue;
+                            };
                             let name = _name.validate_utf8().unwrap_or_default();
                             if name != "" {
-                                /*stringsList.insert(i, name.to_string());
-                                if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
+                                varNames.insert(i, name.to_string());
+                                /*if matches!(name,"plot"|"mystring"|"flag"|"item"|"litem") {
                                     asr::print_limited::<64>(&format_args!("{} found at StringID {}",name,i))
                                 }
                                 timer::set_variable_int("last real string index",i);*/
@@ -359,15 +358,15 @@ async fn main() {
                 objs.clear();
                 retry(|| -> Option<bool> {
                     //for testing we temporarily skip object reading in versions that don't have offsets found yet
-                    let Ok(objArrBase) = process.read_pointer(DELTARUNE.add(objArrOffset),ps) else { return None; };
-                    let Ok(objNum) = process.read::<u32>(objArrBase.add(objNumOff)) else {
+                    let Ok(objArrBase) = process.read_pointer(DELTARUNE+objArrOffset,ps) else { return None; };
+                    let Ok(objNum) = process.read::<u32>(objArrBase+objNumOff) else {
                         return None;
                     };
                     if objNum == 0 { return None; }
                     asr::print_message(format!("Number of objects: {}",objNum).as_str());
                     let Ok(arr) = process.read_pointer(objArrBase,ps) else { return None; };
                     for i in 0..1024u64 { //might be higher in SP? Seems to go up to 2820. However there are only 342 objects in SP so I doubt it'd matter
-                        let Ok(mut objAddr) = process.read_pointer(arr.add(psBytes as u64*i),ps) else { return None; };
+                        let Ok(mut objAddr) = process.read_pointer(arr+(psBytes as u64*i),ps) else { return None; };
                         for _layer in 1..=10 {
                             if objAddr.is_null() { break; }
                             let _name = process.read_pointer_path::<ArrayCString<64>>(objAddr,ps,&[objPropOff,match version { GMS2_v2_2_0 => 0x14, _ => 0 },0x0]).unwrap_or_default();
@@ -381,7 +380,7 @@ async fn main() {
                             objAddr = process.read_pointer(objAddr,ps).unwrap_or_default();
                         }
                     }
-                    if objNum != process.read::<u32>(objArrBase.add(objNumOff)).unwrap_or_default() {return None;}
+                    if objNum != process.read::<u32>(objArrBase+(objNumOff)).unwrap_or_default() {return None;}
                     //if a significant amount of objects were missed
                     if (objs.len() as u32) < (objNum * 3 / 4) { objs.clear(); return None; }
                     return Some(true);
@@ -390,12 +389,12 @@ async fn main() {
 
                 
                 let mantleOutro_instCount = match chapter {
-                    3 => Address::from(process.read_pointer_path::<u64>(get_obj("obj_shadow_mantle_enemy_outro"),ps,&[0x18,0x78]).unwrap_or_default()),
-                    _ => Address::NULL
+                    3 => process.read_pointer_path::<u64>(get_obj("obj_shadow_mantle_enemy_outro"),ps,&[0x18,0x78]).unwrap_or_default(),
+                    _ => 0
                 };
                 let crtEnd_instCount = match chapter {
-                    5 => Address::from(process.read_pointer_path::<u64>(get_obj("obj_LW20W_end"),ps,&[0x18,0x78]).unwrap_or_default()),
-                    _ => Address::NULL
+                    5 => process.read_pointer_path::<u64>(get_obj("obj_LW20W_end"),ps,&[0x18,0x78]).unwrap_or_default(),
+                    _ => 0
                 };
                 /*let mut objs = String::from("");
                 for k in obj_addr_map.keys() {
@@ -469,7 +468,7 @@ async fn main() {
 
                 let objVar = |obj : &str, var : &str| get_obj_var(&process, version, obj, var);
 
-                let arrItem = | arr : Address, index : u64 | process.read::<f64>(arr.add(index*0x10)).unwrap_or_default();
+                let arrItem = | arr : Address, index : u64 | process.read::<f64>(arr+(index*0x10)).unwrap_or_default();
                 
                 let arrCheck = | arr, val, indexStart, indexEnd | -> bool {
                     for i in indexStart..=indexEnd {
@@ -574,7 +573,7 @@ async fn main() {
                             if !matches!(settings.ch5_start_on_prev,Ch5StartOnPrev::Exclusively) {
                                 if cur_room == "PLACE_MENU"
                                 {
-                                    if namer_event.current == 75.0 && namer_event.old == 74.0 {
+                                    if namer_event.bytes_changed_to(&75.0) {
                                         start(&settings.auto_start,&mut splits);
                                     }
                                 }
@@ -588,7 +587,7 @@ async fn main() {
                         _ if prev_room == "PLACE_MENU" => {
                             let namer_event = _namer.update_infallible(objVar("DEVICE_NAMER","EVENT")); //get_obj_var::<f64>(&process,ps,&obj_addr_map,&stringsList,"DEVICE_NAMER","EVENT")
                             timer::set_variable_float("Namer Event",namer_event.current);
-                            if namer_event.current == 75.0 && namer_event.old != 75.0 {
+                            if namer_event.bytes_changed_to(&75.0) {
                                 start(&settings.auto_start,&mut splits);
                             }
                         }
@@ -946,13 +945,13 @@ async fn main() {
                                     },false);
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
-                                        "room_dw_castle_tv_zone_battle" if fighting.old == 0.0 && fighting.current == 1.0 => "ch4_start_mike",
+                                        "room_dw_castle_tv_zone_battle" if fighting.bytes_changed_from_to(&0.0,&1.0) => "ch4_start_mike",
                                         "room_dw_castle_tv_zone_battle" if fighting.current == 1.0 && con.bytes_changed_to(&18.0) => "ch4_beat_mike",
                                         "room_dw_church_jackenstein" if fighting.old == 1.0 && fighting.current == 0.0 => "ch4_jackenstein",
                                         "room_dw_church_arena" if fighting.current == 1.0 && con.bytes_changed_from(&0.0) => "ch4_hammer_of_justice",
                                         "room_dw_churchb_man" if text_check.changed_to(&false) => "ch4_egg",
                                         "room_dw_churchc_prophecies" if text_check.changed_to(&true) => "ch4_princess_ribbon",
-                                        "room_dw_churchc_titanclimb2_post" if fighting.old == 0.0 && fighting.current == 1.0 => "ch4_start_titan_fight",
+                                        "room_dw_churchc_titanclimb2_post" if fighting.bytes_changed_from_to(&0.0,&1.0) => "ch4_start_titan_fight",
                                         "room_torhouse" if con.bytes_changed_from_to(&0.0,&1.0) => "ch4_ending_il",
                                         _ => ""
                                     },false);
