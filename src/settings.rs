@@ -205,8 +205,6 @@ pub struct Settings {
     ///Insert Loaded Disk
     ch2_insert_disk: bool,
     ///Defeat basement NEO
-    ///
-    ///This autosplit does not work if you remove BIG SHOT from the game files (mus\spamton_neo_mix_ex_wip.ogg).
     ch2_defeat_neo_ab: bool,
     ///Exit basement NEO room
     ch2_exit_neo: bool,
@@ -261,8 +259,6 @@ pub struct Settings {
     ///End Knight battle (win)
     ch3_knight_win: bool,
     ///Ending
-    ///
-    ///This autosplit does not work if you remove Crickets from the game files (mus\night_ambience.ogg).
     ch3_ending: bool,
     ///Ending (OST%)
     ch3_ending_ost: bool,

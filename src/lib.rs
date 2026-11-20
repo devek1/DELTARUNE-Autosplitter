@@ -773,6 +773,8 @@ async fn main() {
                                           "room_dw_city_big_2" if text_check.changed_to(&true) => "ch2_freeze_ring",
                                           "room_dw_city_moss" if text_check.changed_to(&false) => "ch2_thorn_ring",
                                           "room_dw_cyber_musical_door" | "room_dw_city_man" if msc.old == 1173.0 && msc.current >= 1173.0 && choice.current <= 0.0 => "ch2_egg",
+                                          "room_dw_mansion_b_east" if fighting.current == 1.0 && (globVal("monsterhp[0]") <= 0.0 || globVal("mercymod[0]") >= 100.0) => "ch2_defeat_neo_ab",
+                                          "room_dw_mansion_fountain_ch2" if fightEnd() => "ch2_sideb_neo",
                                           "room_dw_castle_west_cliff" if text_check.changed_to(&true) => "ch2_thorny_ending",
                                           "room_torhouse" if text_check.changed_to(&true) => "ch2_ending_ac",
                                           "room_torhouse" if text_check2.changed_to(&true) => "ch2_ending_il",
@@ -836,8 +838,7 @@ async fn main() {
                                               _ => "" //there shouldn't be any other possibility here?
                                           },
                                           "room_dw_snow_zone" if fightStart() => "ch3_enter_knight",
-                                          "room_town_shelter" if mus.current.matches("") && mus.old.validate_utf8().unwrap_or_default().ends_with(r"mus\night_ambience.ogg")
-                                          => "ch3_ending",
+                                          "room_town_shelter" if objVar("obj_ch3_PTB04_shelter","con") == 8.0 => "ch3_ending",
                                           "room_dw_man" if flag.bytes_changed_from_to(&0.0,&1.0) => "ch3_egg",
                                           "room_shadowmantle" if mantle_outro.changed_to(&true) => "ch3_end_mantle",
                                           _ => ""
