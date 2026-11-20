@@ -177,13 +177,7 @@ pub enum Item {
     Seeds,
 }
 
-pub fn item_check_slot(
-    process: &Process,
-    chapter: i32,
-    darkzone: f64,
-    Type: &str,
-    ptr: Address,
-) {
+pub fn item_check_slot(process: &Process, chapter: i32, darkzone: f64, Type: &str, ptr: Address) {
     let item = process.read::<f64>(ptr).unwrap_or_default() as i32;
     //if item == 0 || item == i32::MAX || item < 0 { return; }
     item_tracker.insert(match (&Type, item) {
@@ -198,7 +192,7 @@ pub fn item_check_slot(
     });
 }
 
-static item_map: phf::Map<(&str,i32),Item> = phf::phf_map! {
+static item_map: phf::Map<(&str, i32), Item> = phf::phf_map! {
         ("ItemLW", 1i32) => HotChocolate,
         ("ItemLW", 2) => WoodBlade,
         ("ItemLW", 3) => Bandage,
