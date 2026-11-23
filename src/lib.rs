@@ -75,7 +75,7 @@ const IL_Pauses: [&str; 6] = [
     "ch1_ending",
     "ch2_ending_il",
     "ch3_ending",
-    "ch4_ending_il",
+    "ch4_ending",
     "ch5_ending_src",
     "ch5_sideb",
 ];
@@ -901,7 +901,6 @@ async fn main() {
                                         "room_dw_churchb_man" if text_check.changed_to(&false) => "ch4_egg",
                                         "room_dw_churchc_prophecies" if text_check.changed_to(&true) => "ch4_princess_ribbon",
                                         "room_dw_churchc_titanclimb2_post" if fighting.bytes_changed_from_to(&0.0,&1.0) => "ch4_start_titan_fight",
-                                        "room_torhouse" if con.bytes_changed_from_to(&0.0,&1.0) => "ch4_ending_il",
                                         _ => ""
                                     },false);
                                 }

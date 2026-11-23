@@ -15,7 +15,7 @@ pub enum PauseTiming {
 
 #[derive(Gui)]
 pub enum AutoStart {
-    /// Start the timer, reset if was already running
+    /// Start the timer, reset if already running
     #[default]
     AutoReset,
     /// Start the timer, unpause IGT if already running
@@ -46,18 +46,16 @@ pub struct Settings {
     ///Pause the timer between chapters
     #[default = true]
     pub(crate) ac_pause_timer: bool,
-    ///Timing of the pauses
-    pub(crate) chapter_pause_timing: PauseTiming,
     ///Also unpause from loading a savefile
     pub(crate) ac_unpause_loadsave: bool,
-    ///Item Tracker
-    pub(crate) item_tracking: bool,
-    ///Title Tracker
-    pub(crate) title_tracking: bool,
-    ///Function with unrecognized data.win files (for brand-new patches, and mod speedruns)
-    pub(crate) allow_unsupported_version: bool,
-    ///Start/reset timer on loading prior chapter completion data
+    ///Timing of the pauses
+    pub(crate) chapter_pause_timing: PauseTiming,
+    ///Start on loading from completion data
     pub(crate) start_on_prev: StartOnPrev,
+    pub(crate) item_tracking: bool,
+    pub(crate) title_tracking: bool,
+    ///Support unrecognized data.win files
+    pub(crate) allow_unsupported_version: bool,
 
     ///Chapter 1: The Beginning
     ch1_title: Title,
@@ -327,10 +325,8 @@ pub struct Settings {
     ch4_seal_titan: bool,
     ///Seal Third Sanctuary
     ch4_third_sanctuary: bool,
-    ///Ending (Full Game)
+    ///Ending
     ch4_ending: bool,
-    ///Ending (IL)
-    ch4_ending_il: bool,
     ///Ending (OST%)
     ch4_ending_ost: bool,
 
@@ -398,9 +394,9 @@ pub struct Settings {
     ch5_exit_right: bool,
     ///Climb the foyer beanstalk
     ch5_beanstalk: bool,
-    ///Enter the ultimate shop room
+    ///Enter ultimate shop room
     ch5_enter_ultimate_shop: bool,
-    ///Exit the ultimate shop room
+    ///Exit ultimate shop room
     ch5_exit_ultimate_shop: bool,
     ///Enter the final save point room
     ch5_enter_final_save: bool,
@@ -427,8 +423,6 @@ pub struct Settings {
     ///Obtain Bread
     ch5_bread: bool,
     ///Complete Side B
-    ///
-    ///
     ch5_sideb: bool,
 
     ///All Bosses Splits
