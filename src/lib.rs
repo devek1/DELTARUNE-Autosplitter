@@ -684,7 +684,7 @@ async fn main() {
                                         "room_castle_darkdoor" if con.bytes_changed_from_to(&7.0, &21.0) => "ch1_castle_town_door",
                                         "room_man" if msc.bytes_changed_to(&601.0) && choice.current == 0.0 => "ch1_egg",
                                         "room_cc_joker" if con.bytes_changed_to(&4.0) => "ch1_beat_jevil",
-                                        "room_cc_kingbattle" if fighting.bytes_changed_from_to(&1.0,&0.0) => "ch1_king", //delay_split_frames("ch1_king",10).await
+                                        "room_cc_kingbattle" if fightEnd() => "ch1_king", //delay_split_frames("ch1_king",10).await
                                         "room_krisroom" if text_check.changed_to(&true) => "ch1_ending",
                                         "room_ed" if objVar("obj_credits","timer") >= 108.0 => "ch1_ending_ost",
                                         _ => ""
@@ -793,15 +793,10 @@ async fn main() {
                                     "room_dw_snow_zone" => globArrVal("flag[0]",1047),
                                     _ => 0.0
                                 });
-                                let mantle_outro = _instExist.update_infallible(match cur_room {
-                                    "room_shadowmantle" => match process.read::<i32>(mantleOutro_instCount) { Ok(1) => true, _ => false },
-                                    _ => false
-                                });
 
                                 {
                                     #![cfg(debug_assertions)]
                                     timer::set_variable_float("Flag",flag.current);
-                                    timer::set_variable("Mantle Outro",mantle_outro.current.to_string().as_str());
                                 }
 
                                 if cur_room != prev_room {
@@ -826,6 +821,7 @@ async fn main() {
                                         ("room_board_1_sword_trees","room_dw_console_room") => "ch3_ice_key",
                                         ("room_board_dungeon_2","room_dw_console_room") => "ch3_shelter_key",
                                         ("room_board_preshadowmantle","room_shadowmantle") => "ch3_enter_mantle",
+                                        ("room_board_prepostshadowmantle","room_board_postshadowmantle") => "ch3_end_mantle",
                                         ("room_board_postshadowmantle","room_dw_console_room") => "ch3_exit_mantle",
                                         ("room_town_shelter","room_ed") => "ch3_ending_ost",
                                         _ => ""
@@ -840,7 +836,6 @@ async fn main() {
                                           "room_dw_snow_zone" if fightStart() => "ch3_enter_knight",
                                           "room_town_shelter" if objVar("obj_ch3_PTB04_shelter","con") == 8.0 => "ch3_ending",
                                           "room_dw_man" if flag.bytes_changed_from_to(&0.0,&1.0) => "ch3_egg",
-                                          "room_shadowmantle" if mantle_outro.changed_to(&true) => "ch3_end_mantle",
                                           _ => ""
                                     },false);
                                 }
@@ -900,7 +895,7 @@ async fn main() {
                                         "room_dw_church_arena" if fighting.current == 1.0 && con.bytes_changed_from(&0.0) => "ch4_hammer_of_justice",
                                         "room_dw_churchb_man" if text_check.changed_to(&false) => "ch4_egg",
                                         "room_dw_churchc_prophecies" if text_check.changed_to(&true) => "ch4_princess_ribbon",
-                                        "room_dw_churchc_titanclimb2_post" if fighting.bytes_changed_from_to(&0.0,&1.0) => "ch4_start_titan_fight",
+                                        "room_dw_churchc_titanclimb2_post" if fightStart() => "ch4_start_titan_fight",
                                         _ => ""
                                     },false);
                                 }
