@@ -97,8 +97,6 @@ pub struct Settings {
     ch1_exit_preking: bool,
     ///End King battle
     ch1_king: bool,
-    ///End King battle (position check)
-    ch1_king_alt: bool,
     ///Exit King battle room
     ch1_post_king: bool,
     ///Enter Fountain
@@ -111,7 +109,7 @@ pub struct Settings {
     ch1_ending_ost: bool,
     ///Ch1 All Bosses Splits
     #[heading_level = 2]
-    ch1_ab_splits: Title,
+    ch1_ab_title: Title,
     ///Warp from Castle to Field
     ch1_cf_warp: bool,
     ///Warp from Field to Bake Sale
@@ -229,11 +227,11 @@ pub struct Settings {
     ///Enter Cooking Show
     ch3_enter_cooking: bool,
     ///Enter Green Room (post-Board 1)
-    ch3_greenroom1: bool,
+    ch3_end_round1: bool,
     ///Enter Lightners Live
     ch3_enter_rhythm: bool,
     ///Enter Green Room (post-Board 2)
-    ch3_greenroom2: bool,
+    ch3_end_round2: bool,
     ///Enter TV World Backstage (post-Doom Board)
     ch3_escape_doom_board: bool,
     ///Enter TV World

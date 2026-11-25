@@ -769,6 +769,7 @@ async fn main() {
                                     split(&mut splits,&settings,match cur_room {
                                           "room_dw_cyber_queen_boxing" if text_check.changed_to(&false) => "ch2_arcade_text",
                                           //"room_dw_cyber_queen_boxing" if plot.bytes_changed_to(&55.0) => delay_split_frames("ch2_arcade_text", 1).await,
+                                          "room_dw_cyber_rollercoaster" if snd.old.matches("snd_queen_laugh_0") && snd.current.matches("snd_sussurprise") => "ch2_cyber_field",
                                           "room_dw_cyber_music_final" if fightEnd() => "ch2_dj_battle",
                                           "room_dw_city_big_2" if text_check.changed_to(&true) => "ch2_freeze_ring",
                                           "room_dw_city_moss" if text_check.changed_to(&false) => "ch2_thorn_ring",
@@ -819,7 +820,7 @@ async fn main() {
                                         ("room_dw_b3bs_jail2","room_dw_teevie_cowboy_zone_02_intro") => "ch3_2nd_shootout_room",
                                         ("room_dw_teevie_stealth_d","room_dw_teevie_chef") => "ch3_enter_rouxls",
                                         ("room_dw_teevie_chef","room_dw_teevie_dust") => "ch3_exit_rouxls",
-                                        ("room_dw_snow_zone_battle","room_dw_snow_zone") => "ch3_escape_doom_board",
+                                        ("room_dw_snow_zone_battle","room_dw_snow_zone") => "ch3_beat_tenna",
                                         ("room_dw_snow_zone","room_gameover") => "ch3_knight_death",
                                         ("room_board_1_sword_trees","room_dw_console_room") => "ch3_ice_key",
                                         ("room_board_dungeon_2","room_dw_console_room") => "ch3_shelter_key",
@@ -831,15 +832,16 @@ async fn main() {
                                     },false);
                                 } else {
                                     split(&mut splits,&settings,match cur_room {
-                                          "room_dw_snow_zone" if flag.bytes_changed_from(&0.0) => match flag.current {
-                                              1.0 => "ch3_knight_win",
-                                              2.0 => "ch3_knight_death",
-                                              _ => "" //there shouldn't be any other possibility here?
-                                          },
-                                          "room_dw_snow_zone" if fightStart() => "ch3_enter_knight",
-                                          "room_town_shelter" if objVar("obj_ch3_PTB04_shelter","con") == 8.0 => "ch3_ending",
-                                          "room_dw_man" if flag.bytes_changed_from_to(&0.0,&1.0) => "ch3_egg",
-                                          _ => ""
+                                        "room_dw_snow_zone_battle" if fightStart() => "ch3_enter_tenna",
+                                        "room_dw_snow_zone" if flag.bytes_changed_from(&0.0) => match flag.current {
+                                            1.0 => "ch3_knight_win",
+                                            2.0 => "ch3_knight_death",
+                                            _ => "" //there shouldn't be any other possibility here
+                                        },
+                                        "room_dw_snow_zone" if fightStart() => "ch3_enter_knight",
+                                        "room_town_shelter" if objVar("obj_ch3_PTB04_shelter","con") == 8.0 => "ch3_ending",
+                                        "room_dw_man" if flag.bytes_changed_from_to(&0.0,&1.0) => "ch3_egg",
+                                        _ => ""
                                     },false);
                                 }
                             }
@@ -878,7 +880,11 @@ async fn main() {
                                         ("room_dw_church_gersonstudy","room_dw_church_arena") => "ch4_enter_hoj",
                                         ("room_dw_church_arena","room_dw_church_gersonstudy") => "ch4_exit_axe_room",
                                         ("room_dw_church_gersonstudy","room_dw_church_trueclimbadventure" | "room_dw_church_rightconnect") => "ch4_grand_piano",
-                                        ("room_dw_church_holywatercooler","roohurch_entrance") => "ch4_second_sanctuary",
+                                        ("room_dw_church_holywatercooler","room_dw_church_intro_gerson") => "ch4_miss_mizzle",
+                                        ("room_dw_church_fountain","room_lw_church_entrance") => "ch4_first_sanctuary",
+                                        ("room_dw_churchb_darkclimb_scene","room_dw_churchb_darkclimb") => "ch4_fall_down",
+                                        ("room_dw_churchb_nongerson","room_dw_churchb_nongerson_post") => "ch4_sound_of_justice",
+                                        ("room_dw_churchb_fountain","room_lw_church_entrance") => "ch4_second_sanctuary",
                                         ("room_dw_churchc_pretitan","room_dw_churchc_titanclimb1") => "ch4_start_titan_climb1",
                                         ("room_dw_churchc_titanclimb1","room_dw_churchc_titanclimb1_post") => "ch4_end_titan_climb1",
                                         ("room_dw_churchc_titanclimb1_post","room_dw_churchc_titanclimb2") => "ch4_start_titan_climb2",
